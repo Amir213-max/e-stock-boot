@@ -297,6 +297,9 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
         e.preventDefault();
         const storedPass = await db.getAdminPassword();
         if (adminPassword === storedPass) {
+            // حفظ في sessionStorage إنه دخل كلمة المرور بنجاح
+            sessionStorage.setItem('admin_password_entered', 'true');
+            
             setShowAdminLogin(false);
             setAdminPassword('');
             setAdminError('');

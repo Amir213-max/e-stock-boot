@@ -21,6 +21,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const [newPassword, setNewPassword] = useState('');
     const [resetStatus, setResetStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
+    // Training Tab Password Protection
+    const [trainingPasswordEntered, setTrainingPasswordEntered] = useState(false);
+    const [showTrainingPasswordPrompt, setShowTrainingPasswordPrompt] = useState(false);
+    const [trainingPassword, setTrainingPassword] = useState('');
+    const [trainingPasswordError, setTrainingPasswordError] = useState('');
+
     const [activeTab, setActiveTab] = useState<'analytics' | 'history' | 'training' | 'settings'>('analytics');
     const [kbItems, setKbItems] = useState<KBItem[]>([]);
 
@@ -50,11 +56,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const pdfInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
 
+    // Check if password was already entered in this session
+    useEffect(() => {
+        const hasEnteredPassword = sessionStorage.getItem('admin_password_entered');
+        if (hasEnteredPassword === 'true') {
+            setIsAuthenticated(true);
+        }
+    }, []);
+
     useEffect(() => {
         if (isAuthenticated) {
             refreshData();
         }
     }, [isAuthenticated]);
+
+    // Reset training password when switching away from training tab
+    useEffect(() => {
+        if (activeTab !== 'training') {
+            setTrainingPasswordEntered(false);
+        }
+    }, [activeTab]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -90,6 +111,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         } else {
             setResetStatus('error');
             setErrorMsg('مفتاح الاستعادة غير صحيح');
+        }
+    };
+
+    const handleTrainingPasswordSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const adminPass = await db.getAdminPassword();
+        if (trainingPassword === adminPass) {
+            setTrainingPasswordEntered(true);
+            setShowTrainingPasswordPrompt(false);
+            setTrainingPassword('');
+            setTrainingPasswordError('');
+            setActiveTab('training');
+        } else {
+            setTrainingPasswordError('كلمة المرور غير صحيحة');
         }
     };
 
@@ -284,13 +319,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         }
     };
 
-    const handleRestoreDefaults = async () => {
-        if (window.confirm('هل تريد استعادة الدليل الأصلي (Modern Soft Default Manual)؟ سيتم حذف أي ملفات رفعتها.')) {
-            const len = await db.restoreDefaults();
-            setDocsLength(len);
-            alert('✅ تم استعادة الدليل الافتراضي بنجاح.');
-        }
-    };
 
     const handleDownloadDocs = async () => {
         const currentDocs = await db.getDocs();
@@ -722,7 +750,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                             سجل المحادثات
                         </button>
                         <button
-                            onClick={() => setActiveTab('training')}
+                            onClick={async () => {
+                                if (trainingPasswordEntered) {
+                                    setActiveTab('training');
+                                } else {
+                                    setShowTrainingPasswordPrompt(true);
+                                }
+                            }}
                             className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'training' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             تدريب البوت (المعرفة)
@@ -819,8 +853,57 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                     </div>
                 )}
 
+                {/* Training Password Prompt Modal */}
+                {showTrainingPasswordPrompt && (
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+                        <div className={`w-full max-w-sm p-6 rounded-2xl shadow-xl border ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'} animate-in zoom-in-95`}>
+                            <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-center">
+                                كلمة مرور المسؤول
+                            </h2>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 text-center">
+                                يرجى إدخال كلمة مرور المسؤول للوصول إلى قسم تدريب البوت
+                            </p>
+                            <form onSubmit={handleTrainingPasswordSubmit} className="space-y-4">
+                                <input
+                                    type="password"
+                                    value={trainingPassword}
+                                    onChange={(e) => {
+                                        setTrainingPassword(e.target.value);
+                                        setTrainingPasswordError('');
+                                    }}
+                                    placeholder="كلمة المرور"
+                                    className={`w-full px-4 py-3 rounded-lg border ${trainingPasswordError ? 'border-red-500' : 'border-gray-300 dark:border-gray-600'} bg-white dark:bg-gray-700 text-gray-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none`}
+                                    autoFocus
+                                />
+                                {trainingPasswordError && (
+                                    <p className="text-sm text-red-500 text-center">{trainingPasswordError}</p>
+                                )}
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowTrainingPasswordPrompt(false);
+                                            setTrainingPassword('');
+                                            setTrainingPasswordError('');
+                                        }}
+                                        className="flex-1 px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600 font-bold transition-colors"
+                                    >
+                                        إلغاء
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-bold transition-colors"
+                                    >
+                                        تأكيد
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
                 {/* --- Training / Knowledge Management Section --- */}
-                {activeTab === 'training' && (
+                {activeTab === 'training' && trainingPasswordEntered && (
                     <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-300">
 
                         {/* 1. Quick Info Snippets (Highest Priority) */}
@@ -983,13 +1066,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                             className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50"
                                         >
                                             استخراج الداتا
-                                        </button>
-                                        <button
-                                            onClick={handleRestoreDefaults}
-                                            disabled={pdfUploading}
-                                            className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors text-orange-500 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 bg-orange-50 dark:bg-orange-900/30 hover:bg-orange-100 dark:hover:bg-orange-900/50"
-                                        >
-                                            استعادة الأصلي
                                         </button>
                                         <button
                                             onClick={handleClearDocs}

