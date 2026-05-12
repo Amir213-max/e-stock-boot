@@ -2,9 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import BotInterface from './components/BotInterface';
 import RatingModal from './components/RatingModal';
-import ModernSoftLanding from './components/ModernSoftLanding';
+import NewLanding from './components/NewLanding';
 import Login from './components/Login';
 import AdminDashboard from './components/AdminDashboard';
+import LandingAdmin from './components/LandingAdmin';
+import GuestBot from './components/GuestBot';
 import { AppMode, ChatLog, Customer } from './types';
 import { db } from './services/db';
 
@@ -148,17 +150,23 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="h-[100dvh] w-full flex flex-col bg-gray-50 dark:bg-gray-900 font-sans overflow-hidden transition-colors duration-300" dir="rtl">
+        <div className="h-[100dvh] w-full flex flex-col bg-gray-50 dark:bg-gray-900 font-cairo overflow-hidden transition-colors duration-300" dir="rtl">
 
             {/* LANDING PAGE MODE */}
             {mode === AppMode.LANDING && (
                 <div className="h-full w-full overflow-y-auto overflow-x-hidden">
-                    <ModernSoftLanding
+                    <NewLanding
                         onOpenChat={() => setMode(AppMode.LOGIN)}
+                        onSecretClick={() => setMode(AppMode.LANDING_ADMIN)}
                         isDarkMode={isDarkMode}
                         toggleTheme={toggleTheme}
                     />
                 </div>
+            )}
+
+            {/* LANDING ADMIN DASHBOARD */}
+            {mode === AppMode.LANDING_ADMIN && (
+                <LandingAdmin onBack={() => setMode(AppMode.LANDING)} />
             )}
 
             {/* LOGIN MODE */}
@@ -172,9 +180,26 @@ const App: React.FC = () => {
                         }}
                         onAdminLogin={() => setMode(AppMode.ADMIN)}
                         onBack={() => setMode(AppMode.LANDING)}
+                        onGuestAccess={() => setMode(AppMode.GUEST)}
                         isDarkMode={isDarkMode}
                         expired={isSessionExpired}
                     />
+                </div>
+            )}
+
+            {/* GUEST MODE */}
+            {mode === AppMode.GUEST && (
+                <div className="h-full flex flex-col animate-in slide-in-from-bottom-4 duration-300">
+                    <main className="flex-1 relative overflow-hidden p-0 sm:p-4 md:p-6 bg-gray-50 transition-colors">
+                        <div className="h-full max-w-5xl mx-auto flex flex-col">
+                            <div className="flex-1 relative flex flex-col min-h-0">
+                                <GuestBot
+                                    onBack={() => setMode(AppMode.LANDING)}
+                                    onLoginClick={() => setMode(AppMode.LOGIN)}
+                                />
+                            </div>
+                        </div>
+                    </main>
                 </div>
             )}
 

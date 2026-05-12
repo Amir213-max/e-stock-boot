@@ -9,10 +9,12 @@ export interface KBItem {
 export interface ChatLog {
   id: string;
   timestamp: number;
-  userQuery: string; // Full transcript or main query
-  botResponse: string; // Summary
-  clientName?: string; // Extracted client name
+  userQuery: string;
+  botResponse: string;
+  clientName?: string;
   duration: number;
+  isUnanswered?: boolean;
+  systemType?: SystemType;
 }
 
 export interface Feedback {
@@ -29,6 +31,7 @@ export interface ToolCallArgs {
 
 export enum AppMode {
   LANDING = 'LANDING',
+  LOGIN = 'LOGIN',
   CLIENT = 'CLIENT',
   ADMIN = 'ADMIN'
 }
@@ -55,7 +58,7 @@ export interface LandingConfig {
   featuresTitle: string;
   featuresSubtitle: string;
   features: LandingFeature[];
-  
+
   // Footer / General Contact
   aboutCompanyText: string;
   contactEmail: string;
@@ -79,9 +82,55 @@ export interface LandingConfig {
   contactMapUrl: string;
 }
 
+export type SystemType = 'e-Stock Pharmacy' | 'e-Stock Retail' | 'Pharma Store';
+
 export interface KnowledgeSnippet {
-    id: string;
-    content: string;
-    imageUrl?: string; // Base64
-    timestamp: number;
+  id: string;
+  content: string;
+  imageUrl?: string;
+  timestamp: number;
+  systemType: SystemType | 'All';
+  category?: string;
+  menuName?: string;
+  screenName?: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  contractNumber: string;
+  isActive: boolean;
+  createdAt: number;
+  lastLogin?: number;
+  systemType: SystemType;
+}
+
+export interface AppSettings {
+  sessionTimeoutMinutes: number;
+}
+
+export interface DocChunk {
+  id: string;
+  systemType: SystemType;
+  text: string;
+  embedding: number[];
+}
+
+export interface DecisionNode {
+  id: string;
+  text: string; // The question the bot asks
+  options: {
+    label: string; // The button text for the user
+    nextId?: string; // ID of the next node
+    finalAnswer?: string; // If it's a leaf, this is the final solution
+  }[];
+}
+
+export interface TroubleshootFlow {
+  id: string;
+  systemType: SystemType | 'All';
+  triggerKeyword: string; // Word like "طابعة", "انترنت"
+  title: string;
+  nodes: DecisionNode[];
+  startNodeId: string;
 }

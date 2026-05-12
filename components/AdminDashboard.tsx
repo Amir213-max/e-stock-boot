@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
-import { KBItem, ChatLog, Feedback, KnowledgeSnippet, Customer } from '../types';
+import { KBItem, ChatLog, Feedback, KnowledgeSnippet, Customer, SystemType } from '../types';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { GoogleGenAI } from '@google/genai';
+import BotInterface from './BotInterface';
 
 interface AdminDashboardProps {
     isDarkMode?: boolean;
@@ -11,7 +12,7 @@ interface AdminDashboardProps {
 }
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme }) => {
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [adminRole, setAdminRole] = useState<'super' | 'support' | null>(null);
     const [passwordInput, setPasswordInput] = useState('');
     const [errorMsg, setErrorMsg] = useState('');
 
@@ -28,19 +29,47 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const [trainingPasswordError, setTrainingPasswordError] = useState('');
 
     const [activeTab, setActiveTab] = useState<'analytics' | 'history' | 'training' | 'settings'>('analytics');
+    const [cloudStatus, setCloudStatus] = useState<'checking' | 'online' | 'offline' | 'error'>('checking');
+    const [activeSystemType, setActiveSystemType] = useState<SystemType>('e-Stock Pharmacy');
+    const [newCustomerSystemType, setNewCustomerSystemType] = useState<SystemType>('e-Stock Pharmacy');
     const [kbItems, setKbItems] = useState<KBItem[]>([]);
 
     const [logs, setLogs] = useState<ChatLog[]>([]);
     const [feedback, setFeedback] = useState<Feedback[]>([]);
-    const [docsLength, setDocsLength] = useState<number>(0);
+    const [docsLengthPharmacy, setDocsLengthPharmacy] = useState<number>(0);
+    const [docsLengthRetail, setDocsLengthRetail] = useState<number>(0);
+    const [docsLengthStore, setDocsLengthStore] = useState<number>(0);
 
+    const activeDocsLength = activeSystemType === 'e-Stock Pharmacy' ? docsLengthPharmacy :
+                             activeSystemType === 'e-Stock Retail' ? docsLengthRetail : docsLengthStore;
     // Knowledge Snippet State
     const [snippets, setSnippets] = useState<KnowledgeSnippet[]>([]);
-    const [snippetText, setSnippetText] = useState('');
+    const [snippetQuestion, setSnippetQuestion] = useState('');
+    const [snippetCategory, setSnippetCategory] = useState<string>('البيانات العامه');
+    const [snippetMenu, setSnippetMenu] = useState('');
+    const [snippetScreen, setSnippetScreen] = useState('');
+    const [snippetAnswer, setSnippetAnswer] = useState('');
     const [snippetImage, setSnippetImage] = useState<string | null>(null);
+    const [menuText, setMenuText] = useState('');
+    const [pathMenuInput, setPathMenuInput] = useState('');
+    const [pathScreenInput, setPathScreenInput] = useState('');
+    const [structuredPaths, setStructuredPaths] = useState<{menu: string, screen: string}[]>([]);
+    const [globalCategories, setGlobalCategories] = useState<string[]>([]);
+    const [newCategoryInput, setNewCategoryInput] = useState('');
+
+    const [directText, setDirectText] = useState('');
+    const [isDirectTraining, setIsDirectTraining] = useState(false);
+
+    // Unanswered Inbox State
+    const [unansweredLogs, setUnansweredLogs] = useState<ChatLog[]>([]);
+    
+    // Live Testing Arena State
+    const [showTestBot, setShowTestBot] = useState(false);
+
 
     // User Management State
     const [customers, setCustomers] = useState<Customer[]>([]);
+    const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
     const [newCustomerName, setNewCustomerName] = useState('');
     const [newCustomerContract, setNewCustomerContract] = useState('');
     const [sessionTimeout, setSessionTimeout] = useState(15);
@@ -53,22 +82,49 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [uploadSuccess, setUploadSuccess] = useState(false);
 
+    // URL Scrape Setup
+    const [scrapeUrl, setScrapeUrl] = useState('');
+    const [isScraping, setIsScraping] = useState(false);
+
+    // Audio Upload State
+    const [isAudioUploading, setIsAudioUploading] = useState(false);
+    
+    // Sanity Check State
+    const [isSanityChecking, setIsSanityChecking] = useState(false);
+    const [sanityCheckResult, setSanityCheckResult] = useState<string | null>(null);
+
     const pdfInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
+    const audioInputRef = useRef<HTMLInputElement>(null);
+    const visionInputRef = useRef<HTMLInputElement>(null);
+
+    // Vision UI Upload State
+    const [isVisionUploading, setIsVisionUploading] = useState(false);
+
+    // Chunks Editor State
+    const [showChunksModal, setShowChunksModal] = useState(false);
+    const [chunksToEdit, setChunksToEdit] = useState<any[]>([]);
+    const [editingChunkId, setEditingChunkId] = useState<string | null>(null);
+    const [editingChunkText, setEditingChunkText] = useState('');
+    const [isSavingChunk, setIsSavingChunk] = useState(false);
 
     // Check if password was already entered in this session
     useEffect(() => {
-        const hasEnteredPassword = sessionStorage.getItem('admin_password_entered');
-        if (hasEnteredPassword === 'true') {
-            setIsAuthenticated(true);
+        const role = sessionStorage.getItem('admin_role');
+        const legacyAuth = sessionStorage.getItem('admin_password_entered');
+        if (role) {
+            setAdminRole(role as 'super' | 'support');
+        } else if (legacyAuth === 'true') {
+            setAdminRole('super');
+            sessionStorage.setItem('admin_role', 'super');
         }
     }, []);
 
     useEffect(() => {
-        if (isAuthenticated) {
+        if (adminRole !== null) {
             refreshData();
         }
-    }, [isAuthenticated]);
+    }, [adminRole, activeSystemType]);
 
     // Reset training password when switching away from training tab
     useEffect(() => {
@@ -81,7 +137,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         e.preventDefault();
         const adminPass = await db.getAdminPassword();
         if (passwordInput === adminPass) {
-            setIsAuthenticated(true);
+            setAdminRole('super');
+            sessionStorage.setItem('admin_role', 'super');
+            setErrorMsg('');
+        } else if (passwordInput === 'support') {
+            setAdminRole('support');
+            sessionStorage.setItem('admin_role', 'support');
             setErrorMsg('');
         } else {
             setErrorMsg('كلمة المرور غير صحيحة');
@@ -128,25 +189,79 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         }
     };
 
+    const checkCloud = async () => {
+        setCloudStatus('checking');
+        const res = await db.testCloudConnection();
+        setCloudStatus(res.success ? 'online' : (res.error === 'permission-denied' ? 'error' : 'offline'));
+    };
+
     const refreshData = async () => {
+        checkCloud();
         const kb = await db.getKB();
         const l = await db.getLogs();
         const f = await db.getFeedback();
-        const dLen = await db.getDocLength();
-        const s = await db.getSnippets();
-
-        setKbItems(kb);
+        
         setLogs(l);
         setFeedback(f);
-        setDocsLength(dLen);
-        setDocsLength(dLen);
-        setSnippets(s);
+
+        // Filter unanswered
+        const unanswered = l.filter(log => log.isUnanswered);
+        setUnansweredLogs(unanswered);
+
+        const dLenPharma = await db.getDocLength('e-Stock Pharmacy');
+        const dLenRetail = await db.getDocLength('e-Stock Retail');
+        const dLenStore = await db.getDocLength('Pharma Store');
+        
+        setDocsLengthPharmacy(dLenPharma);
+        setDocsLengthRetail(dLenRetail);
+        setDocsLengthStore(dLenStore);
 
         const cust = await db.getCustomers();
         const settings = await db.getAppSettings();
         setCustomers(cust);
         setSessionTimeout(settings.sessionTimeoutMinutes);
     };
+
+    // Load Snippets and Menus whenever the active system tab changes
+    useEffect(() => {
+        const loadSystemData = async () => {
+            const s = await db.getSnippets(activeSystemType);
+            const updatedSnippets = s.map(snip => ({
+                ...snip,
+                category: snip.category === 'عام' ? 'البيانات العامه' : snip.category
+            }));
+            const m = await db.getMenus(activeSystemType);
+            setSnippets(updatedSnippets);
+            setMenuText(m);
+            
+            // Load custom categories for this system from Cloud Database
+            const savedCats = await db.getGlobalCategories(activeSystemType);
+            const filtered = savedCats.filter(c => c !== 'عام');
+            setGlobalCategories(filtered.length > 0 ? filtered : ['البيانات العامه']);
+
+            // Parse menuText into structured paths for the builder
+            if (m) {
+                const lines = m.split('\n').filter(l => l.includes('->'));
+                try {
+                    const parsed = lines.map(line => {
+                        const parts = line.split('->');
+                        const menu = parts[0].replace(/^\d+[-.]?\s*/, '').trim();
+                        const screen = parts[1].trim();
+                        return { menu, screen };
+                    });
+                    setStructuredPaths(parsed);
+                } catch (e) {
+                    console.error("Failed to parse menus", e);
+                }
+            } else {
+                setStructuredPaths([]);
+            }
+        };
+        // only if authenticated to avoid unnecessary calls on login screen
+        if (adminRole !== null) {
+            loadSystemData();
+        }
+    }, [activeSystemType, adminRole]);
 
     const handleSnippetImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
@@ -163,21 +278,45 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         }
     };
 
-    const handleAddSnippet = async () => {
-        if (!snippetText.trim()) return;
+    const handleAddSnippet = async (overrideQ?: string, overrideA?: string, logIdToRemove?: string) => {
+        const q = overrideQ || snippetQuestion;
+        const a = overrideA || snippetAnswer;
+        if (!q.trim() || !a.trim()) return;
 
         const newSnippet: KnowledgeSnippet = {
             id: Date.now().toString(),
-            content: snippetText,
-            imageUrl: snippetImage || undefined,
-            timestamp: Date.now()
+            content: `سؤال: ${q}\n- إجابة: ${a}`,
+            timestamp: Date.now(),
+            systemType: activeSystemType,
+            category: snippetCategory,
+            menuName: snippetMenu,
+            screenName: snippetScreen,
+            imageUrl: snippetImage || undefined
         };
-
         await db.addSnippet(newSnippet);
-        setSnippets([newSnippet, ...snippets]);
-        setSnippetText('');
-        setSnippetImage(null);
-        if (imageInputRef.current) imageInputRef.current.value = '';
+        setSnippets(prev => [newSnippet, ...prev]);
+        if (!overrideQ) {
+            setSnippetQuestion('');
+            setSnippetAnswer('');
+            setSnippetMenu('');
+            setSnippetScreen('');
+            setSnippetImage(null);
+            if (imageInputRef.current) imageInputRef.current.value = '';
+        }
+        
+        // If it was from an unanswered log, we should mark it as resolved (delete the log or just update it)
+        if (logIdToRemove) {
+            alert('تم حفظ المعلومة وتدريب البوت عليها!');
+            setUnansweredLogs(prev => prev.filter(l => l.id !== logIdToRemove));
+        }
+    };
+
+    const handleSaveMenu = async () => {
+        // Regenerate menuText from structuredPaths to ensure NO numbers are saved in the raw bot text
+        const cleanText = structuredPaths.map(p => `${p.menu} -> ${p.screen}`).join('\n');
+        setMenuText(cleanText);
+        await db.saveMenus(cleanText, activeSystemType);
+        alert('✅ تم حفظ المسارات بنجاح وتصفية الأرقام من ذاكرة البوت.');
     };
 
     const handleDeleteSnippet = async (id: string) => {
@@ -221,9 +360,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                     textContent += `\n--- الصفحة ${i} ---\n${pageText}`;
                 }
             }
-            // 2. Word (.docx) Handler
-            else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-                const mammoth = await import('mammoth');
+            // 2. Word (.docx / .doc) Handler
+            else if (file.type.includes('word') || file.type.includes('officedocument') || file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+                const mammothModule = await import('mammoth');
+                const mammoth = mammothModule.default || mammothModule;
                 const arrayBuffer = await file.arrayBuffer();
                 const result = await mammoth.extractRawText({ arrayBuffer });
                 textContent = result.value;
@@ -253,57 +393,86 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
 
             if (!textContent.trim()) throw new Error('الملف فارغ أو لم يتم استخراج نصوص منه.');
 
-            // --- AI Processing Step ---
-            setUploadProgress('جاري فهم وتحليل المحتوى بواسطة الذكاء الاصطناعي...');
+            // RAG Processing: Chunking and Embedding
+            setUploadProgress('جاري تقسيم النص وبناء ذواكر البحث الذكية (Vector Embeddings)، يرجى الانتظار...');
+            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+            
+            // Clean text and split by paragraphs
+            const paragraphs = textContent.split(/\n\s*\n/).filter(p => p.trim().length > 20); 
+            
+            // Combine short paragraphs into 1000-char chunks
+            const chunks: string[] = [];
+            let currentChunk = "";
+            for (let p of paragraphs) {
+                if ((currentChunk.length + p.length) > 1000) {
+                    chunks.push(`📚 **source:** ${file.name}\n` + currentChunk);
+                    currentChunk = p;
+                } else {
+                    currentChunk += "\n\n" + p;
+                }
+            }
+            if (currentChunk) chunks.push(`📚 **source:** ${file.name}\n` + currentChunk);
 
-            if (!process.env.API_KEY) {
-                throw new Error("مفتاح API غير موجود. لا يمكن تحليل الملف.");
+            const docChunks: any[] = []; // Explicitly use any to match DocChunk if import fails implicitly
+
+            // Batch embed
+            for (let i = 0; i < chunks.length; i++) {
+                setUploadProgress(`جاري حفظ الفقرة ${i + 1} من ${chunks.length} بالذكاء الاصطناعي...`);
+                try {
+                    const response = await ai.models.embedContent({
+                        model: 'gemini-embedding-2',
+                        contents: chunks[i]
+                    });
+                    if (response.embeddings?.[0]?.values) {
+                        docChunks.push({
+                            id: Date.now() + "_" + i,
+                            systemType: activeSystemType,
+                            text: chunks[i],
+                            embedding: response.embeddings[0].values
+                        });
+                    }
+                } catch (embErr) {
+                    console.warn(`Retry chunk ${i}`, embErr);
+                    await new Promise(r => setTimeout(r, 2000));
+                    try {
+                        const response = await ai.models.embedContent({
+                            model: 'gemini-embedding-2',
+                            contents: chunks[i]
+                        });
+                        if (response.embeddings?.[0]?.values) {
+                            docChunks.push({
+                                id: Date.now() + "_" + i,
+                                systemType: activeSystemType,
+                                text: chunks[i],
+                                embedding: response.embeddings[0].values
+                            });
+                        }
+                    } catch (e) {
+                         console.error("Skipping chunk due to embedding error", e);
+                    }
+                }
             }
 
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const model = ai.chats.create({ model: 'gemini-2.5-flash' });
+            // Append PROCESSED content to existing docs chunks
+            const currentChunks = await db.getDocChunks(activeSystemType);
+            const finalDocChunks = [...currentChunks, ...docChunks];
 
-            const analysisPrompt = `
-            Act as a **Senior Knowledge Engineer** for "Modern Soft". Your task is to process the following raw documentation into a **High-Quality, Agent-Ready Knowledge Base**.
-
-            **Goal:** Create a structured reference that allows a support bot to answer user questions instantly and accurately.
-
-            **INSTRUCTIONS:**
-            1.  **Language**: Output MUST be in **Egyptian Arabic (Technical Support Tone)**. Use terms like "دوس على"، "افتح قائمة"، "يا فندم".
-            2.  **Structure**:
-                *   **Main Title**: What is this file about?
-                *   **Summary**: A 2-line overview.
-                *   **Q&A Section (CRITICAL)**: Convert every piece of info into "User Question" -> "Detailed Answer". 
-                    *   *Example*: 
-                        *   Q: "ازاي اضيف صنف جديد؟"
-                        *   A: "1. من القائمة الرئيسية اختر [المخازن]. 2. اضغط على..."
-                *   **Troubleshooting**: If the text contains errors or problems, format them as "Problem" -> "Solution".
-            3.  **Content Cleanup**: Ignore page numbers, headers, footers, and nonsense characters.
-            4.  **Completeness**: Do not summarize away important details. Keep exact button names, shortcuts (e.g., F12), and values.
-
-            **Raw Content from file (${file.name}):**
-            ${textContent.substring(0, 50000)}
-            `;
-
-            const result = await model.sendMessage({ message: analysisPrompt });
-            const processedContent = result.text;
-
-            if (!processedContent) throw new Error("فشل الذكاء الاصطناعي في تحليل الملف.");
-
-            // Append PROCESSED content to existing docs
-            const currentDocs = await db.getDocs();
-            const separator = currentDocs ? "\n\n================================\n" : "";
-            const finalDocs = currentDocs + separator + `📚 **source:** ${file.name} (Processed by AI)\n` + processedContent;
-
-            await db.saveDocs(finalDocs);
-            setDocsLength(finalDocs.length);
+            await db.saveDocChunks(finalDocChunks, activeSystemType);
+            
+            const newLen = finalDocChunks.reduce((acc, c) => acc + c.text.length, 0);
+            if (activeSystemType === 'e-Stock Pharmacy') setDocsLengthPharmacy(newLen);
+            else if (activeSystemType === 'e-Stock Retail') setDocsLengthRetail(newLen);
+            else setDocsLengthStore(newLen);
 
             setUploadSuccess(true);
+            alert("✅ تم رفع ومعالجة الملف بنجاح! تم تحديث ذاكرة البوت.");
             setTimeout(() => setUploadSuccess(false), 5000);
 
         } catch (error: any) {
             console.error("File Upload Error", error);
-            setUploadError(`حدث خطأ أثناء المعالجة: ${error.message || 'خطأ غير معروف'}`);
+            const msg = `حدث خطأ أثناء المعالجة: ${error.message || 'خطأ غير معروف'}`;
+            setUploadError(msg);
+            alert("❌ " + msg);
         } finally {
             setPdfUploading(false);
             setUploadProgress('');
@@ -312,18 +481,249 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     };
 
     const handleClearDocs = async () => {
-        if (window.confirm('⚠️ تحذير: سيتم حذف جميع المعلومات (بما في ذلك الدليل الافتراضي للمخازن) ويصبح البوت "ورقة بيضاء". هل أنت متأكد؟')) {
-            await db.resetDocs();
-            setDocsLength(0);
-            alert('✅ تم حذف جميع المعلومات بنجاح.');
+        if (window.confirm(`⚠️ تحذير: سيتم حذف جميع معلومات (${activeSystemType}). هل أنت متأكد؟`)) {
+            await db.resetDocs(activeSystemType);
+            if (activeSystemType === 'e-Stock Pharmacy') setDocsLengthPharmacy(0);
+            else if (activeSystemType === 'e-Stock Retail') setDocsLengthRetail(0);
+            else setDocsLengthStore(0);
+            alert('✅ تم حذف المعلومات بنجاح.');
+        }
+    };
+
+    // --- Scraping Handler ---
+    const handleScrapeUrl = async () => {
+        if (!scrapeUrl.trim()) return;
+        setIsScraping(true);
+        setUploadError(null);
+        setUploadSuccess(false);
+        setUploadProgress('جاري سحب البيانات من الرابط...');
+
+        try {
+            // Use allorigins to bypass CORS
+            const response = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(scrapeUrl)}`);
+            if (!response.ok) throw new Error('فشل الاتصال بالرابط.');
+            const data = await response.json();
+            const html = data.contents;
+            
+            // Extract text roughly
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const textContent = doc.body.innerText.replace(/\n\s*\n/g, '\n\n').trim();
+
+            if (!textContent) throw new Error('لم يتم العثور على أي نصوص في الرابط.');
+
+            setUploadProgress('جاري حفظ الداتا من الرابط وبناء ذواكر البحث...');
+            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+            
+            const paragraphs = textContent.split(/\n\s*\n/).filter(p => p.trim().length > 20); 
+            const chunks: string[] = [];
+            let currentChunk = "";
+            for (let p of paragraphs) {
+                if ((currentChunk.length + p.length) > 1000) {
+                    chunks.push(`📚 **source url:** ${scrapeUrl}\n` + currentChunk);
+                    currentChunk = p;
+                } else {
+                    currentChunk += "\n\n" + p;
+                }
+            }
+            if (currentChunk) chunks.push(`📚 **source url:** ${scrapeUrl}\n` + currentChunk);
+
+            const docChunks: any[] = [];
+            for (let i = 0; i < chunks.length; i++) {
+                setUploadProgress(`سحب فقرة ${i + 1} من ${chunks.length}...`);
+                const res = await ai.models.embedContent({ model: 'gemini-embedding-2', contents: chunks[i] });
+                if (res.embeddings?.[0]?.values) {
+                    docChunks.push({
+                        id: Date.now() + "_scrape_" + i,
+                        systemType: activeSystemType,
+                        text: chunks[i],
+                        embedding: res.embeddings[0].values
+                    });
+                }
+            }
+
+            const currentChunks = await db.getDocChunks(activeSystemType);
+            const finalDocChunks = [...currentChunks, ...docChunks];
+            await db.saveDocChunks(finalDocChunks, activeSystemType);
+            
+            const newLen = finalDocChunks.reduce((acc, c) => acc + c.text.length, 0);
+            if (activeSystemType === 'e-Stock Pharmacy') setDocsLengthPharmacy(newLen);
+            else if (activeSystemType === 'e-Stock Retail') setDocsLengthRetail(newLen);
+            else setDocsLengthStore(newLen);
+
+            setUploadSuccess(true);
+            setScrapeUrl('');
+            setTimeout(() => setUploadSuccess(false), 5000);
+
+        } catch(e: any) {
+            setUploadError(`خطأ في الرابط: ${e.message}`);
+        } finally {
+            setIsScraping(false);
+            setUploadProgress('');
+        }
+    };
+
+    // --- Audio Training Handler ---
+    const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setIsAudioUploading(true);
+        try {
+            const base64Data = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const dataUrl = reader.result as string;
+                    resolve(dataUrl.split(',')[1]);
+                };
+                reader.readAsDataURL(file);
+            });
+            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { inlineData: { mimeType: file.type || "audio/mp3", data: base64Data } },
+                        { text: "أنت خبير دعم فني. استمع للمكالمة، واستخرج المشكلة التي سألها العميل والإجابة (الحل) بطريقة مختصرة وواضحة جداً. أرجعهم بصيغة JSON فقط: {\"question\": \"...\", \"answer\": \"...\"}" }
+                    ]
+                }]
+            });
+            
+            const text = response.text || "";
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if(jsonMatch) {
+                const res = JSON.parse(jsonMatch[0]);
+                setSnippetQuestion(res.question);
+                setSnippetAnswer(res.answer);
+                alert("تم استخراج المشكلة والحل بنجاح، متبقي فقط الضغط على 'حفظ المعلومة'.");
+                window.scrollTo({ top: 300, behavior: 'smooth' });
+            } else {
+                 alert("لم يتم استخراج معلومات كافية من الصوت.");
+            }
+        } catch(err:any) {
+            alert("خطأ أثناء تحليل الصوت: " + err.message);
+        } finally {
+            setIsAudioUploading(false);
+            if (e.target) e.target.value = '';
+        }
+    };
+
+    // --- Vision Training Handler ---
+    const handleVisionUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setIsVisionUploading(true);
+        try {
+            const base64Data = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const dataUrl = reader.result as string;
+                    resolve(dataUrl.split(',')[1]);
+                };
+                reader.readAsDataURL(file);
+            });
+            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { inlineData: { mimeType: file.type || "image/jpeg", data: base64Data } },
+                        { text: "أنت خبير تصوير واستخدام لأنظمة الكمبيوتر. هذه شاشة لبرنامج. استخرج وصف كامل للزراير والمهام التي يمكن القيام بها في هذه الشاشة بصيغة (سؤال: ما هي شاشة كذا؟ / جواب: هذه الشاشة تحتوي على كذا وكذا). رده بصيغة JSON فقط: {\"question\": \"...\", \"answer\": \"...\"}" }
+                    ]
+                }]
+            });
+            
+            const text = response.text || "";
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if(jsonMatch) {
+                const res = JSON.parse(jsonMatch[0]);
+                setSnippetQuestion(res.question);
+                setSnippetAnswer(res.answer);
+                alert("تم تحليل الشاشة واستخراج الداتا. راجع السؤال والجواب ثم اضغط حفظ.");
+                window.scrollTo({ top: 300, behavior: 'smooth' });
+            } else {
+                 alert("لم يتم استخراج معلومات كافية من الصورة.");
+            }
+        } catch(err:any) {
+            alert("خطأ أثناء تحليل الصورة: " + err.message);
+        } finally {
+            setIsVisionUploading(false);
+            if (e.target) e.target.value = '';
+        }
+    };
+
+    // --- Chunks Editor Logic ---
+    const handleOpenChunksEditor = async () => {
+        const c = await db.getDocChunks(activeSystemType);
+        setChunksToEdit(c);
+        setShowChunksModal(true);
+    };
+
+    const handleSaveChunkEdit = async () => {
+        if (!editingChunkId || !editingChunkText.trim()) return;
+        setIsSavingChunk(true);
+        try {
+            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+            const res = await ai.models.embedContent({ model: 'gemini-embedding-2', contents: editingChunkText });
+            if (res.embeddings?.[0]?.values) {
+                const updatedChunks = chunksToEdit.map(c => 
+                    c.id === editingChunkId ? { ...c, text: editingChunkText, embedding: res.embeddings[0].values } : c
+                );
+                await db.saveDocChunks(updatedChunks, activeSystemType);
+                setChunksToEdit(updatedChunks);
+                setEditingChunkId(null);
+                setEditingChunkText('');
+                
+                // Update length
+                const newLen = updatedChunks.reduce((acc, c) => acc + c.text.length, 0);
+                if (activeSystemType === 'e-Stock Pharmacy') setDocsLengthPharmacy(newLen);
+                else if (activeSystemType === 'e-Stock Retail') setDocsLengthRetail(newLen);
+                else setDocsLengthStore(newLen);
+            }
+        } catch (e: any) {
+            alert("خطأ أثناء تعديل الفقرة: " + e.message);
+        } finally {
+            setIsSavingChunk(false);
+        }
+    };
+
+    const handleDeleteChunk = async (id: string) => {
+        if (!window.confirm("حذف هذه الفقرة من ذاكرة البوت نهائياً؟")) return;
+        const updatedChunks = chunksToEdit.filter(c => c.id !== id);
+        await db.saveDocChunks(updatedChunks, activeSystemType);
+        setChunksToEdit(updatedChunks);
+        // Update length
+        const newLen = updatedChunks.reduce((acc, c) => acc + c.text.length, 0);
+        if (activeSystemType === 'e-Stock Pharmacy') setDocsLengthPharmacy(newLen);
+        else if (activeSystemType === 'e-Stock Retail') setDocsLengthRetail(newLen);
+        else setDocsLengthStore(newLen);
+    };
+
+    // --- Knowledge Sanity Check ---
+    const handleSanityCheck = async () => {
+        setIsSanityChecking(true);
+        setSanityCheckResult(null);
+        try {
+            const currentSnippets = snippets.filter(s => s.systemType === activeSystemType || s.systemType === 'All');
+            const dataToAnalyze = currentSnippets.map(s => s.content).join('\n\n');
+            const prompt = `أنت خبير وتدقق معلومات تدريب البوت (Snippets) لنظام ${activeSystemType}. حلل هذه المعلومات بدقة، واكتشف ما إذا كان هناك أي تضارب (Contradiction) أو تعارض قاطع في المنطق أو الأرقام. اكتب تحليلاً بالعربية، إذا وجد تضارب وضحه بوضوح شديد، وإن لم يوجد قل بصراحة: "جميع المعلومات متوافقة ولا يوجد تضارب".\n\nمعلومات النظام:\n${dataToAnalyze}`;
+            
+            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+            setSanityCheckResult(response.text || "لم يتم إيجاد تضارب.");
+        } catch(e: any) {
+            setSanityCheckResult(`خطأ في فحص التضارب: ${e.message}`);
+        } finally {
+            setIsSanityChecking(false);
         }
     };
 
 
+
     const handleDownloadDocs = async () => {
-        const currentDocs = await db.getDocs();
+        const currentDocs = await db.getDocs(activeSystemType);
         // ... rest stays same, just ensuring we get everything
-        const snippets = await db.getSnippets();
+        const snippets = await db.getSnippets(activeSystemType);
 
         let fullContent = currentDocs || "";
 
@@ -479,7 +879,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
             'رقم الجلسة': fb.chatId
         }));
         downloadCSV(exportData, `mosaad_feedback_${new Date().toISOString().slice(0, 10)}.csv`);
-        downloadCSV(exportData, `mosaad_feedback_${new Date().toISOString().slice(0, 10)}.csv`);
     };
 
     // --- User Management Handlers ---
@@ -492,7 +891,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
             name: newCustomerName.trim(),
             contractNumber: newCustomerContract.trim(),
             isActive: true,
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            systemType: newCustomerSystemType
         };
 
         if (customers.some(c => c.contractNumber === cust.contractNumber)) {
@@ -504,6 +904,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         setCustomers([...customers, cust]);
         setNewCustomerName('');
         setNewCustomerContract('');
+    };
+
+    const handleEditCustomer = (customer: Customer) => {
+        setEditingCustomer({ ...customer });
+    };
+
+    const handleUpdateCustomer = async () => {
+        if (!editingCustomer) return;
+        await db.saveCustomer(editingCustomer);
+        setCustomers(customers.map(c => c.id === editingCustomer.id ? editingCustomer : c));
+        setEditingCustomer(null);
+        alert('✅ تم تحديث بيانات العميل بنجاح.');
     };
 
     const handleToggleStatus = async (customer: Customer) => {
@@ -552,7 +964,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                             name,
                             contractNumber: contract,
                             isActive: true,
-                            createdAt: Date.now()
+                            createdAt: Date.now(),
+                            systemType: 'e-Stock Pharmacy'
                         });
                     }
                 }
@@ -596,12 +1009,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     };
 
 
-    const totalUsers = logs.length;
-    const averageRating = feedback.length
-        ? (feedback.reduce((acc, curr) => acc + curr.rating, 0) / feedback.length).toFixed(1)
+    // Filter logs and feedback based on active system for the analytics
+    const filteredLogs = logs.filter(log => !activeSystemType || log.systemType === activeSystemType);
+    const filteredFeedback = feedback.filter(f => !activeSystemType || f.systemType === activeSystemType);
+
+    const totalUsers = filteredLogs.length;
+    const averageRating = filteredFeedback.length
+        ? (filteredFeedback.reduce((acc, curr) => acc + curr.rating, 0) / filteredFeedback.length).toFixed(1)
         : '0';
 
-    const logsByDate = logs.reduce((acc: any, log) => {
+    const logsByDate = filteredLogs.reduce((acc: any, log) => {
         const date = new Date(log.timestamp).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric' });
         acc[date] = (acc[date] || 0) + 1;
         return acc;
@@ -612,9 +1029,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         sessions: logsByDate[date]
     })).reverse().slice(0, 7);
 
-    if (!isAuthenticated) {
+    if (adminRole === null) {
         return (
-            <div className="flex flex-col items-center justify-center h-full min-h-[500px] transition-colors">
+            <div className={`min-h-screen ${isDarkMode ? 'bg-gray-900 border-gray-800' : 'bg-gray-50'} flex flex-col items-center justify-center h-full min-h-[500px] transition-colors`}>
                 <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl w-full max-w-md border border-gray-100 dark:border-gray-700 transition-all duration-300">
                     <div className="text-center mb-6">
                         <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl shadow-sm">
@@ -733,6 +1150,23 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                         </svg>
                     </div>
                     <h1 className="text-xl font-bold text-gray-800 dark:text-white tracking-tight">لوحة التحكم</h1>
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-bold transition-all duration-500 ${
+                        cloudStatus === 'online' ? 'bg-green-50 border-green-200 text-green-600 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' :
+                        cloudStatus === 'error' ? 'bg-red-50 border-red-200 text-red-600 animate-pulse dark:bg-red-900/30 dark:border-red-800 dark:text-red-400' :
+                        cloudStatus === 'offline' ? 'bg-orange-50 border-orange-200 text-orange-600 dark:bg-orange-900/30 dark:border-orange-800 dark:text-orange-400' :
+                        'bg-gray-50 border-gray-200 text-gray-500 dark:bg-gray-800 dark:border-gray-700'
+                    }`}>
+                        <div className={`w-2 h-2 rounded-full ${
+                            cloudStatus === 'online' ? 'bg-green-500' :
+                            cloudStatus === 'error' ? 'bg-red-500' :
+                            cloudStatus === 'offline' ? 'bg-orange-500' :
+                            'bg-gray-400 animate-bounce'
+                        }`} />
+                        {cloudStatus === 'online' ? 'متصل بالسحابة (مزامنة نشطة)' :
+                         cloudStatus === 'error' ? 'خطأ مزامنة (Firestore Rules)' :
+                         cloudStatus === 'offline' ? 'وضع الأوفلاين (تخزين محلي)' :
+                         'جاري التحقق من السحابة...'}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-4 mt-4 md:mt-0 w-full md:w-auto">
@@ -749,25 +1183,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                         >
                             سجل المحادثات
                         </button>
-                        <button
-                            onClick={async () => {
-                                if (trainingPasswordEntered) {
-                                    setActiveTab('training');
-                                } else {
-                                    setShowTrainingPasswordPrompt(true);
-                                }
-                            }}
-                            className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'training' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
-                        >
-                            تدريب البوت (المعرفة)
-                        </button>
-                        <button
-                            onClick={() => setActiveTab('settings')}
-                            className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'settings' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
-                        >
-                            المستخدمين والإعدادات
-                        </button>
-
+                        
+                        {adminRole === 'super' && (
+                            <>
+                                <button
+                                    onClick={async () => {
+                                        if (trainingPasswordEntered) {
+                                            setActiveTab('training');
+                                        } else {
+                                            setShowTrainingPasswordPrompt(true);
+                                        }
+                                    }}
+                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'training' ? 'bg-white dark:bg-gray-600 text-purple-600 dark:text-purple-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+                                >
+                                    تدريب البوت (المعرفة)
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('settings')}
+                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'settings' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+                                >
+                                    المستخدمين والإعدادات
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
@@ -803,13 +1241,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                     <span className="text-blue-500 dark:text-blue-400 text-xs font-bold bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-full">جلسة</span>
                                 </div>
                             </div>
-                            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between h-32">
-                                <h3 className="text-gray-400 dark:text-gray-500 font-medium text-xs uppercase tracking-wider">حجم المعرفة</h3>
-                                <div className="flex items-end justify-between">
-                                    <p className="text-3xl font-bold text-gray-800 dark:text-white">
-                                        {(docsLength / 1024).toFixed(1)} <span className="text-lg text-gray-400 font-normal">ك.ب</span>
+                            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col justify-between min-h-32 relative group overflow-hidden">
+                                <div className="absolute top-0 right-0 w-1.5 h-full bg-blue-600"></div>
+                                <div className="flex justify-between items-start">
+                                    <h3 className="text-gray-400 dark:text-gray-500 font-medium text-[10px] uppercase tracking-widest flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                                        ذاكرة النظام النشط ({activeSystemType})
+                                    </h3>
+                                    <div className="flex gap-2">
+                                        <button onClick={handleDownloadDocs} className="text-gray-400 hover:text-blue-600 transition-colors" title="استخراج الداتا">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                            </svg>
+                                        </button>
+                                        <button onClick={handleOpenChunksEditor} className="text-gray-400 hover:text-purple-600 transition-colors" title="تعديل الذاكرة">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col mt-2">
+                                    <p className="text-3xl font-black text-gray-800 dark:text-white">
+                                        {(activeDocsLength / 1024).toFixed(1)} <span className="text-sm font-normal text-gray-400 tracking-normal">ك.ب</span>
                                     </p>
-                                    <span className="text-green-500 dark:text-green-400 text-xs font-bold bg-green-50 dark:bg-green-900/30 px-2 py-1 rounded-full">جاهز</span>
+                                    <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400 mt-1 uppercase">مساحة التخزين المستهلكة</p>
                                 </div>
                             </div>
                         </div>
@@ -905,26 +1361,400 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                 {/* --- Training / Knowledge Management Section --- */}
                 {activeTab === 'training' && trainingPasswordEntered && (
                     <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-300">
+                        {/* Tab Bar for 3 Systems */}
+                        <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-full">
+                            {(['e-Stock Pharmacy', 'e-Stock Retail', 'Pharma Store'] as SystemType[]).map(sys => (
+                                <button
+                                    key={sys}
+                                    onClick={() => setActiveSystemType(sys)}
+                                    className={`flex-1 px-4 py-3 rounded-lg text-sm font-bold transition-all ${activeSystemType === sys ? 'bg-blue-600 text-white shadow-md' : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white'}`}
+                                >
+                                    {sys === 'e-Stock Pharmacy' ? 'صيدليات (Pharmacy)' : sys === 'e-Stock Retail' ? 'تجاري (Retail)' : 'سلاسل (Pharma Store)'}
+                                </button>
+                            ))}
+                            <button
+                                onClick={() => setShowTestBot(true)}
+                                className="ml-2 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition-all shadow-md flex items-center gap-2"
+                            >
+                                <span>🤖</span> ساحة التجربة
+                            </button>
+                        </div>
 
-                        {/* 1. Quick Info Snippets (Highest Priority) */}
+
+                        {/* Active System Memory Status Card */}
+                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-6 rounded-2xl border border-blue-100 dark:border-blue-800 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 animate-in slide-in-from-top-4 duration-500">
+                            <div className="flex items-center gap-5">
+                                <div className="w-14 h-14 bg-white dark:bg-gray-800 rounded-2xl shadow-sm flex items-center justify-center text-2xl">
+                                    📊
+                                </div>
+                                <div>
+                                    <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 mb-1">حالة ذاكرة برنامج: {activeSystemType}</h3>
+                                    <div className="flex items-center gap-3">
+                                        <p className="text-3xl font-black text-blue-600 dark:text-blue-400">
+                                            {(activeDocsLength / 1024).toFixed(2)} <span className="text-xs font-normal text-gray-500">كيلوبايت</span>
+                                        </p>
+                                        <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[10px] font-bold rounded-full animate-pulse">
+                                            متصل وجاهز
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 font-bold mt-1 uppercase tracking-wider">إجمالي الحروف: {activeDocsLength.toLocaleString()} حرف</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 w-full md:w-auto">
+                                <button
+                                    onClick={handleOpenChunksEditor}
+                                    className="flex-1 md:flex-none px-6 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-all shadow-sm flex items-center justify-center gap-2"
+                                >
+                                    <span>✏️</span> تعديل الذاكرة
+                                </button>
+                                <button
+                                    onClick={handleDownloadDocs}
+                                    className="flex-1 md:flex-none px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold hover:bg-blue-700 transition-all shadow-md flex items-center justify-center gap-2"
+                                >
+                                    <span>📥</span> استخراج الداتا
+                                </button>
+                            </div>
+                        </div>
+
+
+                        {/* Sanity Check Feature */}
+                        <div className="flex justify-between items-center bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-2xl border border-yellow-200 dark:border-yellow-800 shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+                            <div className="absolute top-0 right-0 w-2 h-full bg-yellow-500"></div>
+                            <div>
+                                <h3 className="text-sm font-bold text-yellow-800 dark:text-yellow-400 mb-1 flex items-center gap-2">
+                                    <span>🧠</span> فحص تضارب البيانات الذكي (Sanity Check)
+                                </h3>
+                                <p className="text-xs text-yellow-700 dark:text-yellow-500/80 max-w-lg">
+                                    هل أضفت بيانات متضاربة بالخطأ؟ اضغط هنا وسيقوم الذكاء الاصطناعي بمراجعة كل الأسئلة والأجوبة واكتشاف التعارضات.
+                                </p>
+                            </div>
+                            <button
+                                onClick={handleSanityCheck}
+                                disabled={isSanityChecking || snippets.length === 0}
+                                className="bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-md transition-all whitespace-nowrap"
+                            >
+                                {isSanityChecking ? 'جاري الفحص...' : 'فحص تضارب البيانات الآن'}
+                            </button>
+                        </div>
+                        
+                        {sanityCheckResult && (
+                            <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 shadow-inner">
+                                <h4 className="text-sm font-bold mb-2 flex justify-between items-center text-gray-800 dark:text-white">
+                                    نتائج الفحص:
+                                    <button onClick={() => setSanityCheckResult(null)} className="text-red-500 hover:text-red-700 text-xs font-normal">إغلاق</button>
+                                </h4>
+                                <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">{sanityCheckResult}</p>
+                            </div>
+                        )}
+
+                        {/* Unanswered Inbox */}
+                        {unansweredLogs.length > 0 && (
+                            <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-2xl border border-red-200 dark:border-red-800 shadow-sm relative overflow-hidden animate-in fade-in duration-300">
+                                <div className="absolute top-0 right-0 w-2 h-full bg-red-500"></div>
+                                <h3 className="text-lg font-bold text-red-800 dark:text-red-400 mb-2 flex items-center gap-2">
+                                    <span>📥</span> صندوق الأسئلة المفقودة ({unansweredLogs.length})
+                                </h3>
+                                <p className="text-sm text-red-600 dark:text-red-400/80 mb-4">
+                                    العملاء سألوا الأسئلة دي ومقدرش البوت يجاوب. جاوبهم هنا عشان توفرها كمعلومة ذكية للبوت فوراً.
+                                </p>
+                                <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+                                   {unansweredLogs.map(log => {
+                                       const qArr = log.userQuery.split('🤖');
+                                       const lastQ = qArr[qArr.length - 1].replace('E-stock Bot:', '').replace(/👤 العميل:/g, '').trim();
+                                       return (
+                                       <div key={log.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-red-100 dark:border-red-900 flex flex-col gap-2 shadow-sm">
+                                            <p className="text-sm font-bold text-gray-800 dark:text-gray-200">سؤال العميل:</p>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-2 rounded">{lastQ}</p>
+                                            
+                                            <textarea 
+                                                id={`ans_${log.id}`}
+                                                placeholder="اكتب الإجابة هنا لتعليم البوت..."
+                                                className="w-full mt-2 p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-800 dark:text-gray-200"
+                                            />
+                                            <button 
+                                                onClick={async () => {
+                                                    const ans = (document.getElementById(`ans_${log.id}`) as HTMLTextAreaElement).value;
+                                                    if(ans) await handleAddSnippet(lastQ, ans, log.id);
+                                                }}
+                                                className="self-end bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition">حفظ وتدريب البوت</button>
+                                       </div>
+                                       );
+                                   })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 0. System Structure Manager (Map) */}
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-2 h-full bg-blue-600"></div>
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
+                                <span>🗺️</span> إدارة خريطة النظام (القوائم والشاشات)
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                عرف البوت هنا على هيكل برنامجك. أضف أسماء القوائم الرئيسية ثم أضف الشاشات التابعة لكل قائمة. هذا يساعد البوت في إعطاء مسارات دقيقة جداً.
+                            </p>
+
+                            <div className="bg-blue-50/50 dark:bg-blue-900/10 p-5 rounded-2xl border border-blue-100 dark:border-blue-800 mb-6">
+                                <h4 className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-3 flex items-center gap-2">
+                                    <span>📁</span> الخطوة 1: أضف القوائم الرئيسية (مثل: المبيعات، الحسابات)
+                                </h4>
+
+
+                            <div className="flex gap-2 mb-4">
+                                <input
+                                    type="text"
+                                    value={newCategoryInput}
+                                    onChange={e => setNewCategoryInput(e.target.value)}
+                                    placeholder="اسم القسم (مثال: المبيعات)"
+                                    className="flex-1 p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl outline-none text-gray-700 dark:text-gray-100 text-sm"
+                                    onKeyPress={e => e.key === 'Enter' && document.getElementById('add-cat-btn')?.click()}
+                                />
+                                <button
+                                    id="add-cat-btn"
+                                    onClick={async () => {
+                                        if (!newCategoryInput.trim() || globalCategories.includes(newCategoryInput.trim())) return;
+                                        const newCats = [...globalCategories, newCategoryInput.trim()];
+                                        setGlobalCategories(newCats);
+                                        await db.saveGlobalCategories(newCats, activeSystemType);
+                                        setNewCategoryInput('');
+                                    }}
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-xl font-bold transition-all shadow-md"
+                                >
+                                    إضافة قسم
+                                </button>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                                {globalCategories.map(cat => (
+                                    <div key={cat} className="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-blue-100 dark:border-blue-800 transition-all group">
+                                        {cat}
+                                        {cat !== 'البيانات العامه' && (
+                                            <button 
+                                                onClick={async () => {
+                                                    const filtered = globalCategories.filter(c => c !== cat);
+                                                    setGlobalCategories(filtered);
+                                                    await db.saveGlobalCategories(filtered, activeSystemType);
+                                                }}
+                                                className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                            >✕</button>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                            </div>
+
+                            <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700">
+                                <h4 className="text-sm font-bold text-purple-800 dark:text-purple-300 mb-3 flex items-center gap-2">
+                                    <span>📑</span> الخطوة 2: أضف الشاشات التابعة لكل قائمة
+                                </h4>
+
+
+                            <div className="flex flex-col md:flex-row gap-3 mb-6 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl border border-gray-100 dark:border-gray-600">
+                                <div className="flex-1 space-y-1">
+                                    <label className="text-[10px] font-bold text-gray-400 mr-2 uppercase">اسم القائمة</label>
+                                    <input
+                                        type="text"
+                                        list="menu-suggestions"
+                                        value={pathMenuInput}
+                                        onChange={e => setPathMenuInput(e.target.value)}
+                                        placeholder="مثال: المبيعات"
+                                        className="w-full p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-gray-700 dark:text-gray-100 text-sm"
+                                    />
+                                    <datalist id="menu-suggestions">
+                                        {globalCategories.map(cat => (
+                                            <option key={cat} value={cat} />
+                                        ))}
+                                    </datalist>
+                                </div>
+                                <div className="flex-1 space-y-1">
+                                    <label className="text-[10px] font-bold text-gray-400 mr-2 uppercase">اسم الشاشة</label>
+                                    <input
+                                        id="screen-input"
+                                        type="text"
+                                        value={pathScreenInput}
+                                        onChange={e => setPathScreenInput(e.target.value)}
+                                        placeholder="مثال: فاتورة بيع"
+                                        className="w-full p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-gray-700 dark:text-gray-100 text-sm"
+                                        onKeyPress={e => {
+                                            if(e.key === 'Enter') {
+                                                // Trigger addition on Enter key
+                                                document.getElementById('add-path-btn')?.click();
+                                            }
+                                        }}
+                                    />
+                                </div>
+                                <button
+                                    id="add-path-btn"
+                                        onClick={() => {
+                                            if (!pathMenuInput.trim() || !pathScreenInput.trim()) return;
+                                            const newPaths = [...structuredPaths, { menu: pathMenuInput.trim(), screen: pathScreenInput.trim() }];
+                                            setStructuredPaths(newPaths);
+                                            setPathScreenInput(''); // Only clear screen to allow bulk adding to same menu
+                                            // Update the raw text for the bot WITHOUT numbers
+                                            const raw = newPaths.map((p) => `${p.menu} -> ${p.screen}`).join('\n');
+                                            setMenuText(raw);
+                                            // Refocus screen input
+                                            document.getElementById('screen-input')?.focus();
+                                        }}
+                                        className="md:mt-5 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-md flex items-center justify-center gap-2"
+                                    >
+                                        <span>➕</span> إضافة
+                                    </button>
+                                </div>
+
+                                {structuredPaths.length > 0 && (
+                                    <div className="mb-6 space-y-4 max-h-[350px] overflow-y-auto pr-2 scrollbar-thin">
+                                        {/* Group paths by menu for cleaner view */}
+                                        {Object.entries(
+                                            structuredPaths.reduce((acc, curr) => {
+                                                if (!acc[curr.menu]) acc[curr.menu] = [];
+                                                acc[curr.menu].push(curr.screen);
+                                                return acc;
+                                            }, {} as Record<string, string[]>)
+                                        ).map(([menu, screens], gIdx) => (
+                                            <div key={menu} className="bg-white dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-600 overflow-hidden shadow-sm">
+                                                <div className="bg-purple-50 dark:bg-purple-900/20 px-4 py-2 border-b border-gray-100 dark:border-gray-600 flex justify-between items-center">
+                                                    <span className="text-sm font-bold text-purple-700 dark:text-purple-300 flex items-center gap-2">
+                                                        📁 {menu}
+                                                        <span className="text-[10px] bg-purple-200 dark:bg-purple-800 px-1.5 py-0.5 rounded-full">{screens.length}</span>
+                                                    </span>
+                                                </div>
+                                                <div className="p-2 flex flex-wrap gap-2">
+                                                    {screens.map((screen, sIdx) => (
+                                                        <div key={sIdx} className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-500 rounded-lg px-3 py-1.5 flex items-center gap-2 group transition-all hover:border-red-300">
+                                                            <span className="text-xs text-gray-700 dark:text-gray-200">{screen}</span>
+                                                            <button 
+                                                                onClick={() => {
+                                                                    // Delete specific item
+                                                                    const filtered = structuredPaths.filter(p => !(p.menu === menu && p.screen === screen));
+                                                                    setStructuredPaths(filtered);
+                                                                    const raw = filtered.map((p) => `${p.menu} -> ${p.screen}`).join('\n');
+                                                                    setMenuText(raw);
+                                                                }}
+                                                                className="text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                            <details className="mb-4">
+                                <summary className="text-xs font-bold text-gray-400 cursor-pointer hover:text-gray-600 dark:hover:text-gray-300 transition-colors">تعديل النص الخام (Advanced)</summary>
+                                <textarea
+                                    value={menuText}
+                                    onChange={e => {
+                                        setMenuText(e.target.value);
+                                        // Try to sync back to structured
+                                        const lines = e.target.value.split('\n').filter(l => l.includes('->'));
+                                        const parsed = lines.map(line => {
+                                            const parts = line.split('->');
+                                            const menu = parts[0].replace(/^\d+[-.]?\s*/, '').trim();
+                                            const screen = parts[1].trim();
+                                            return { menu, screen };
+                                        });
+                                        setStructuredPaths(parsed);
+                                    }}
+                                    placeholder="تعديل مباشر بتنسيق: القائمة -> الشاشة"
+                                    className="w-full mt-2 p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl outline-none text-xs font-mono text-gray-500 min-h-[100px]"
+                                />
+                            </details>
+
+                            <div className="text-left">
+                                <button
+                                    onClick={handleSaveMenu}
+                                    className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-2.5 rounded-xl font-bold shadow-lg transition-all active:scale-95"
+                                >
+                                    حفظ وتفعيل المسارات
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* --- Question & Answer Training Section --- */}
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden mt-8">
                             <div className="absolute top-0 right-0 w-2 h-full bg-orange-500"></div>
                             <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
-                                <span>⚡</span> تدريب سريع (أولوية قصوى)
+                                <span>⚡</span> الطريقة الثانية: إضافة سؤال وجواب مباشر (مع الصور)
                             </h3>
                             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                                استخدم هذا الجزء لتعليم البوت إجابات محددة، أو إضافة معلومات غير موجودة في الدليل، أو تصحيح معلومة خاطئة.
-                                <br />
-                                <span className="text-xs text-orange-600 dark:text-orange-400 font-bold">ملاحظة: المعلومات المضافة هنا لها الأولوية وتلغي ما في الدليل في حالة التعارض.</span>
+                                أسرع طريقة لتدريب البوت على حل مشكلة معينة أو الرد على سؤال متكرر. يمكنك إرفاق صورة توضيحية.
                             </p>
 
                             <div className="space-y-3">
-                                <textarea
-                                    value={snippetText}
-                                    onChange={e => setSnippetText(e.target.value)}
-                                    placeholder="مثال: إذا سأل العميل عن سعر النسخة الجديدة، قل له 5000 جنيه بدلاً من 4000."
-                                    className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100 min-h-[100px] placeholder-gray-400 dark:placeholder-gray-500"
-                                />
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-xs font-bold text-gray-500 mr-2 text-right">اسم القائمة</label>
+                                        <input
+                                            type="text"
+                                            value={snippetMenu}
+                                            onChange={e => setSnippetMenu(e.target.value)}
+                                            placeholder="مثال: المبيعات"
+                                            className="p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100 text-sm"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                        <label className="text-xs font-bold text-gray-500 mr-2 text-right">اسم الشاشة</label>
+                                        <input
+                                            type="text"
+                                            value={snippetScreen}
+                                            onChange={e => setSnippetScreen(e.target.value)}
+                                            placeholder="مثال: فاتورة مبيعات صيدلية"
+                                            className="p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100 text-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    <div className="flex flex-col flex-1 gap-1">
+                                        <label className="text-xs font-bold text-gray-500 mr-2 text-right">التصنيف</label>
+                                        <div className="flex gap-2">
+                                            <select
+                                                value={snippetCategory}
+                                                onChange={e => setSnippetCategory(e.target.value)}
+                                                className="flex-1 p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100 text-sm font-bold"
+                                            >
+                                                {globalCategories.map(cat => (
+                                                    <option key={cat} value={cat}>{cat}</option>
+                                                ))}
+                                                <option value="Other">... يدوي</option>
+                                            </select>
+                                            {snippetCategory === 'Other' && (
+                                                <input 
+                                                    type="text"
+                                                    placeholder="اكتب اسم القسم..."
+                                                    className="flex-1 p-3 bg-white dark:bg-gray-700 border border-purple-300 rounded-xl text-sm"
+                                                    onBlur={e => {
+                                                        if(e.target.value) setSnippetCategory(e.target.value);
+                                                    }}
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col flex-[3] gap-1">
+                                        <label className="text-xs font-bold text-gray-500 mr-2 text-right">سؤال العميل</label>
+                                        <input
+                                            type="text"
+                                            value={snippetQuestion}
+                                            onChange={e => setSnippetQuestion(e.target.value)}
+                                            placeholder="سؤال العميل (مثال: ازاي اضيف صنف جديد؟)"
+                                            className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <label className="text-xs font-bold text-gray-500 mr-2 text-right">إجابة البوت</label>
+                                    <textarea
+                                        value={snippetAnswer}
+                                        onChange={e => setSnippetAnswer(e.target.value)}
+                                        placeholder="إجابة البوت (مثال: من القائمة الرئيسية اختر المخازن ثم...)"
+                                        className="w-full p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100 min-h-[100px] placeholder-gray-400 dark:placeholder-gray-500"
+                                    />
+                                </div>
 
                                 <div className="flex items-center gap-3">
                                     <label className="cursor-pointer bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-2">
@@ -951,8 +1781,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                     <div className="flex-1"></div>
 
                                     <button
-                                        onClick={handleAddSnippet}
-                                        disabled={!snippetText.trim()}
+                                        onClick={() => handleAddSnippet()}
+                                        disabled={!snippetQuestion.trim() || !snippetAnswer.trim()}
                                         className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         حفظ المعلومة
@@ -966,104 +1796,213 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                             <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
                                 <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">معلومات مضافة يدوياً ({snippets.length})</h3>
                                 <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
-                                    {snippets.map(snippet => (
-                                        <div key={snippet.id} className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl border border-gray-200 dark:border-gray-600 flex gap-4 items-start group">
-                                            {snippet.imageUrl && (
+                                    {snippets.map(s => (
+                                        <div key={s.id} className="bg-gray-50 dark:bg-gray-700/50 p-4 rounded-xl border border-gray-200 dark:border-gray-600 flex gap-4 items-start group">
+                                            {s.imageUrl && (
                                                 <div className="w-16 h-16 bg-gray-200 dark:bg-gray-600 rounded-lg overflow-hidden flex-shrink-0 border border-gray-300 dark:border-gray-500">
-                                                    <img src={snippet.imageUrl} alt="snippet" className="w-full h-full object-cover" />
+                                                    <img src={s.imageUrl} alt="snippet" className="w-full h-full object-cover" />
                                                 </div>
                                             )}
                                             <div className="flex-1">
-                                                <p className="text-gray-700 dark:text-gray-200 text-sm whitespace-pre-wrap">{snippet.content}</p>
-                                                <span className="text-[10px] text-gray-400 mt-2 block">{new Date(snippet.timestamp).toLocaleDateString('ar-EG')}</span>
+                                                <div className="flex justify-between items-start mb-2">
+                                                    <div>
+                                                        <span className="bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                                                            {s.category || 'البيانات العامه'}
+                                                        </span>
+                                                        {(s.menuName || s.screenName) && (
+                                                            <span className="mr-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                                                                📍 {s.menuName} {s.screenName ? ` -> ${s.screenName}` : ''}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => handleDeleteSnippet(s.id)}
+                                                        className="text-gray-400 hover:text-red-500 transition-colors p-1"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                                <p className="text-gray-700 dark:text-gray-200 text-sm whitespace-pre-wrap mt-1">{s.content}</p>
                                             </div>
-                                            <button
-                                                onClick={() => handleDeleteSnippet(snippet.id)}
-                                                className="text-red-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30 opacity-0 group-hover:opacity-100 transition-all"
-                                            >
-                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                                                </svg>
-                                            </button>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         )}
 
-                        {/* 2. Full Manual Upload (Base Knowledge) */}
+                        {/* 2. Manual Upload (Base Knowledge) */}
                         <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm text-center relative overflow-hidden">
-                            <div className="absolute top-0 right-0 w-2 h-full bg-blue-500"></div>
-                            <div className="w-16 h-16 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <div className="absolute top-0 right-0 w-2 h-full bg-green-500"></div>
+                            <div className="w-16 h-16 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mx-auto mb-6">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                                 </svg>
                             </div>
-                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">الدليل الكامل (قاعدة المعرفة الأساسية)</h3>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 max-w-md mx-auto leading-relaxed">
-                                هذا الخيار يستخدم عند وجود تحديث كبير في النظام أو دليل مستخدم جديد بصيغة PDF. سيتم استبدال الدليل القديم بالكامل.
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2">الطريقة الأولى: رفع ملفات المعرفة</h3>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-6 max-w-md mx-auto leading-relaxed">
+                                ارفع ملفات (Word, PDF, Text) تحتوي على شرح للبرنامج. اتبع النموذج المرفق لضمان أفضل إجابة من البوت.
                             </p>
 
-                            {/* Notifications */}
-                            {uploadError && (
-                                <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-4 rounded-xl text-sm font-medium mb-4 text-center border border-red-100 dark:border-red-800 animate-in slide-in-from-top-2">
-                                    {uploadError}
-                                </div>
-                            )}
-                            {uploadSuccess && (
-                                <div className="bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 p-4 rounded-xl text-sm font-medium mb-4 text-center border border-green-100 dark:border-green-800 animate-in slide-in-from-top-2">
-                                    تم تحديث الدليل بنجاح!
-                                </div>
-                            )}
+                            <div className="flex flex-col gap-3 max-w-md mx-auto">
+                                <input
+                                    type="file"
+                                    accept=".pdf,.docx,.txt"
+                                    ref={pdfInputRef}
+                                    onChange={handleFileUpload}
+                                    className="hidden"
+                                />
 
-                            <div className="space-y-4">
-                                <div className="flex flex-col gap-3">
-                                    <input
-                                        type="file"
-                                        accept=".pdf,.docx,.txt,.xlsx,.xls,.csv"
-                                        ref={pdfInputRef}
-                                        onChange={handleFileUpload}
-                                        className="hidden"
-                                    />
-
-                                    {pdfUploading ? (
-                                        <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden p-4">
-                                            <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">
-                                                <span>{uploadProgress}</span>
-                                                <span className="animate-pulse">جاري المعالجة...</span>
-                                            </div>
-                                            <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2 overflow-hidden">
-                                                <div className="bg-blue-600 h-2 rounded-full animate-progress-indeterminate"></div>
-                                            </div>
+                                {pdfUploading ? (
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-xl overflow-hidden p-4">
+                                        <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-2">
+                                            <span>{uploadProgress}</span>
+                                            <span className="animate-pulse font-bold text-blue-600">جاري المعالجة...</span>
                                         </div>
-                                    ) : (
-                                        <button
-                                            onClick={() => pdfInputRef.current?.click()}
-                                            disabled={pdfUploading}
-                                            className="w-full py-3 rounded-xl font-bold text-white transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700"
-                                        >
-                                            رفع ملف معرفة جديد (PDF, Excel, Word, Text)
-                                        </button>
-                                    )}
+                                        <div className="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2.5 overflow-hidden">
+                                            <div className="bg-blue-600 h-2.5 rounded-full animate-progress-indeterminate"></div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <button
+                                        onClick={() => pdfInputRef.current?.click()}
+                                        disabled={pdfUploading}
+                                        className="w-full py-4 rounded-xl font-bold text-white transition-all shadow-lg hover:shadow-xl flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 active:scale-95"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                                        </svg>
+                                        اختر الملف من جهازك
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* --- NEW: Direct Text Training (Alternative to Files) --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-xl space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+                            <div className="flex items-center gap-4 mb-2">
+                                <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-2xl flex items-center justify-center text-xl shadow-inner">
+                                    📝
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-black text-gray-800 dark:text-white">تدريب سريع بالنص المباشر (نسخ ولصق)</h3>
+                                    <p className="text-xs text-gray-500 font-medium">إذا واجهت مشكلة في رفع الملف، انسخ محتواه هنا مباشرة وسيفهمه البوت فوراً.</p>
                                 </div>
                             </div>
 
-                            {docsLength > 0 && (
+                            <div className="space-y-4">
+                                <textarea
+                                    value={directText}
+                                    onChange={(e) => setDirectText(e.target.value)}
+                                    placeholder="انسخ النص من ملف الـ Word أو أي مكان والصقه هنا... (يمكنك لصق نصوص ضخمة جداً)"
+                                    className="w-full h-64 p-5 bg-gray-50 dark:bg-gray-700/50 border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-2xl focus:ring-4 focus:ring-green-500/20 focus:border-green-500 outline-none text-gray-700 dark:text-gray-200 transition-all resize-none scrollbar-thin"
+                                />
+                                
+                                <button
+                                    onClick={async () => {
+                                        if (!directText.trim()) return;
+                                        setIsDirectTraining(true);
+                                        try {
+                                            // Reuse the chunking logic for the pasted text
+                                            const paragraphs = directText.split(/\n\s*\n/).filter(p => p.trim().length > 20);
+                                            const chunks: string[] = [];
+                                            let currentChunk = "";
+                                            for (let p of paragraphs) {
+                                                if ((currentChunk.length + p.length) > 1000) {
+                                                    chunks.push(`📝 **Direct Input:**\n` + currentChunk);
+                                                    currentChunk = p;
+                                                } else {
+                                                    currentChunk += "\n\n" + p;
+                                                }
+                                            }
+                                            if (currentChunk) chunks.push(`📝 **Direct Input:**\n` + currentChunk);
+
+                                            const docChunks: any[] = [];
+                                            const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
+                                            
+                                            for (let i = 0; i < chunks.length; i++) {
+                                                setUploadProgress(`جاري معالجة الجزء ${i+1} من ${chunks.length}...`);
+                                                const res = await ai.models.embedContent({ model: 'gemini-embedding-2', contents: chunks[i] });
+                                                if (res.embeddings?.[0]?.values) {
+                                                    docChunks.push({
+                                                        id: Date.now() + "_direct_" + i,
+                                                        systemType: activeSystemType,
+                                                        text: chunks[i],
+                                                        embedding: res.embeddings[0].values
+                                                    });
+                                                }
+                                            }
+
+                                            const currentChunks = await db.getDocChunks(activeSystemType);
+                                            await db.saveDocChunks([...currentChunks, ...docChunks], activeSystemType);
+                                            
+                                            const newLen = [...currentChunks, ...docChunks].reduce((acc, c) => acc + c.text.length, 0);
+                                            if (activeSystemType === 'e-Stock Pharmacy') setDocsLengthPharmacy(newLen);
+                                            else if (activeSystemType === 'e-Stock Retail') setDocsLengthRetail(newLen);
+                                            else setDocsLengthStore(newLen);
+
+                                            setDirectText('');
+                                            alert("✅ تم تدريب البوت على النص المباشر بنجاح!");
+                                        } catch (e: any) {
+                                            alert("خطأ أثناء التدريب: " + e.message);
+                                        } finally {
+                                            setIsDirectTraining(false);
+                                            setUploadProgress('');
+                                        }
+                                    }}
+                                    disabled={isDirectTraining || !directText.trim()}
+                                    className="w-full py-4 bg-green-600 hover:bg-green-700 text-white rounded-2xl font-black shadow-lg shadow-green-600/20 transition-all disabled:opacity-50 flex items-center justify-center gap-3 text-lg"
+                                >
+                                    {isDirectTraining ? (
+                                        <>
+                                            <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                            جاري التدريب...
+                                        </>
+                                    ) : (
+                                        <><span>🚀</span> تدريب البوت على هذا النص الآن</>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* --- Memory Management Section --- */}
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden mt-8">
+                            <div className="absolute top-0 right-0 w-2 h-full bg-blue-500"></div>
+                            <h3 className="text-xl font-bold text-gray-800 dark:text-white mb-2 flex items-center gap-2">
+                                <span>💾</span> إدارة الذاكرة والمراجعة
+                            </h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                من هنا يمكنك مراجعة وتعديل كل المعلومات التي استوعبها البوت.
+                            </p>
+
+                            {activeDocsLength > 0 ? (
                                 <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                                    <div className="text-right">
-                                        <p className="text-sm font-bold text-gray-800 dark:text-white">حالة الذاكرة الأساسية</p>
-                                        <div className="flex items-center gap-2">
-                                            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                                            <p className="text-xs font-medium text-green-600 dark:text-green-400">
-                                                {docsLength.toLocaleString()} حرف (محفوظ)
-                                            </p>
+                                    <div className="text-right bg-blue-50/50 dark:bg-blue-900/10 p-4 rounded-2xl border border-blue-100 dark:border-blue-900/30">
+                                        <p className="text-sm font-bold text-blue-800 dark:text-blue-300 mb-1">📊 حجم ذاكرة ({activeSystemType})</p>
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex flex-col">
+                                                <p className="text-2xl font-black text-blue-600 dark:text-blue-400">
+                                                    {(activeDocsLength / 1024).toFixed(2)} <span className="text-xs font-normal">كيلوبايت</span>
+                                                </p>
+                                                <p className="text-[10px] text-gray-400 font-bold">
+                                                    إجمالي الحروف: {activeDocsLength.toLocaleString()} حرف
+                                                </p>
+                                            </div>
+                                            <span className="w-3 h-3 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)] animate-pulse"></span>
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
                                         <button
+                                            onClick={handleOpenChunksEditor}
+                                            className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors text-purple-600 dark:text-purple-400 hover:text-purple-800 hover:bg-purple-100 bg-purple-50 dark:bg-purple-900/30 dark:hover:bg-purple-900/50"
+                                        >
+                                            👁️ محرر الذاكرة
+                                        </button>
+                                        <button
                                             onClick={handleDownloadDocs}
                                             disabled={pdfUploading}
-                                            className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors text-blue-500 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50"
+                                            className="text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors text-blue-500 dark:blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50"
                                         >
                                             استخراج الداتا
                                         </button>
@@ -1076,7 +2015,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                         </button>
                                     </div>
                                 </div>
+                            ) : (
+                                <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 text-center flex flex-col items-center justify-center gap-2">
+                                    <span className="text-2xl">📭</span>
+                                    <p className="text-gray-500 dark:text-gray-400 text-sm font-bold">
+                                        لم تقم برفع أي ملفات أو نصوص للبرنامج الحالي.
+                                    </p>
+                                    <p className="text-gray-400 dark:text-gray-500 text-xs">
+                                        ابدأ بتدريب البوت من الطرق المذكورة أعلاه لتظهر لك حالة الذاكرة هنا.
+                                    </p>
+                                </div>
                             )}
+                        </div>
+
+                        {/* 4. Global Control - Clear All */}
+                        <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-2xl border border-red-100 dark:border-red-900/30 shadow-sm mt-8">
+                            <h3 className="text-lg font-bold text-red-700 dark:text-red-400 mb-2 flex items-center gap-2">
+                                <span>⚠️</span> منطقة التحكم الشاملة (جميع البرامج)
+                            </h3>
+                            <p className="text-sm text-red-600/80 dark:text-red-400/80 mb-4">
+                                تحذير: هذا القسم يؤثر على جميع الأنظمة الثلاثة (صيدليات، تجاري، سلاسل). استخدمه فقط عند الرغبة في تصفير ذكاء البوت بالكامل والبدء من جديد.
+                            </p>
+                            <button
+                                onClick={async () => {
+                                    if (window.confirm('هل أنت متأكد تماماً من حذف كافة بيانات التدريب لجميع البرامج؟ لا يمكن التراجع عن هذه الخطوة.')) {
+                                        await db.clearAllTrainingData();
+                                        await refreshData();
+                                        alert('✅ تم تصفير كافة بيانات البوت في جميع الأنظمة بنجاح.');
+                                    }
+                                }}
+                                className="w-full bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg transition-all flex items-center justify-center gap-2"
+                            >
+                                🗑️ حذف كافة بيانات التدريب لجميع الأنظمة
+                            </button>
                         </div>
                     </div>
                 )}
@@ -1184,6 +2155,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                         className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 dark:text-white"
                                     />
                                 </div>
+                                <div className="flex-1 w-full">
+                                    <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">نوع النظام</label>
+                                    <select
+                                        value={newCustomerSystemType}
+                                        onChange={(e) => setNewCustomerSystemType(e.target.value as SystemType)}
+                                        className="w-full px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 outline-none text-gray-900 dark:text-white cursor-pointer"
+                                    >
+                                        <option value="e-Stock Pharmacy">e-Stock Pharmacy</option>
+                                        <option value="e-Stock Retail">e-Stock Retail</option>
+                                        <option value="Pharma Store">Pharma Store</option>
+                                    </select>
+                                </div>
                                 <button
                                     type="submit"
                                     className="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold shadow-sm transition-all"
@@ -1225,8 +2208,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
 
                         {/* Users List */}
                         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-                            <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-700/30">
+                            <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col md:flex-row gap-4 justify-between items-center bg-gray-50/50 dark:bg-gray-700/30">
                                 <h3 className="font-bold text-gray-800 dark:text-white">قائمة العملاء ({customers.length})</h3>
+                                <div className="flex items-center gap-2">
+                                    <label className="text-xs font-bold text-gray-400">تصفية حسب:</label>
+                                    <select
+                                        className="text-xs p-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === 'all') {
+                                                refreshData(); // Should reload all
+                                            } else {
+                                                db.getCustomers().then(all => {
+                                                    setCustomers(all.filter(c => c.systemType === val));
+                                                });
+                                            }
+                                        }}
+                                    >
+                                        <option value="all">كل البرامج</option>
+                                        <option value="e-Stock Pharmacy">e-Stock Pharmacy</option>
+                                        <option value="e-Stock Retail">e-Stock Retail</option>
+                                        <option value="Pharma Store">Pharma Store</option>
+                                    </select>
+                                </div>
                             </div>
                             <div className="max-h-[500px] overflow-y-auto">
                                 <table className="w-full text-right">
@@ -1234,6 +2238,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                         <tr>
                                             <th className="px-6 py-3">الاسم</th>
                                             <th className="px-6 py-3">رقم التعاقد</th>
+                                            <th className="px-6 py-3">نوع البرنامج</th>
                                             <th className="px-6 py-3">تاريخ الإضافة</th>
                                             <th className="px-6 py-3">الحالة</th>
                                             <th className="px-6 py-3">إجراءات</th>
@@ -1244,6 +2249,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                             <tr key={c.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                                 <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">{c.name}</td>
                                                 <td className="px-6 py-4 text-gray-600 dark:text-gray-300 font-mono">{c.contractNumber}</td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${
+                                                        c.systemType === 'e-Stock Pharmacy' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300' :
+                                                        c.systemType === 'e-Stock Retail' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-300' :
+                                                        'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
+                                                    }`}>
+                                                        {c.systemType}
+                                                    </span>
+                                                </td>
                                                 <td className="px-6 py-4 text-gray-500 dark:text-gray-400 text-sm">{new Date(c.createdAt).toLocaleDateString('ar-EG')}</td>
                                                 <td className="px-6 py-4">
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${c.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'}`}>
@@ -1251,6 +2265,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => handleEditCustomer(c)}
+                                                        className="p-1.5 rounded-lg text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors"
+                                                        title="تعديل البيانات"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                                        </svg>
+                                                    </button>
                                                     <button
                                                         onClick={() => handleToggleStatus(c)}
                                                         className={`p-1.5 rounded-lg transition-colors ${c.isActive ? 'text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30' : 'text-green-500 hover:bg-green-50 dark:hover:bg-green-900/30'}`}
@@ -1291,6 +2314,167 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                     </div>
                 )}
             </div>
+
+            {/* Editing Customer Modal */}
+            {editingCustomer && (
+                <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className={`w-full max-w-md p-6 rounded-2xl shadow-xl border ${isDarkMode ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-100 text-gray-900'} animate-in zoom-in-95`}>
+                        <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
+                             ✏️ تعديل بيانات العميل
+                        </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-1">الاسم</label>
+                                <input
+                                    type="text"
+                                    value={editingCustomer.name}
+                                    onChange={(e) => setEditingCustomer({ ...editingCustomer, name: e.target.value })}
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-1">رقم التعاقد</label>
+                                <input
+                                    type="text"
+                                    value={editingCustomer.contractNumber}
+                                    onChange={(e) => setEditingCustomer({ ...editingCustomer, contractNumber: e.target.value })}
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-500 mb-1">نوع النظام</label>
+                                <select
+                                    value={editingCustomer.systemType}
+                                    onChange={(e) => setEditingCustomer({ ...editingCustomer, systemType: e.target.value as SystemType })}
+                                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="e-Stock Pharmacy">e-Stock Pharmacy</option>
+                                    <option value="e-Stock Retail">e-Stock Retail</option>
+                                    <option value="Pharma Store">Pharma Store</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="mt-8 flex gap-3">
+                            <button
+                                onClick={() => setEditingCustomer(null)}
+                                className="flex-1 px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-700 font-bold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                إلغاء
+                            </button>
+                            <button
+                                onClick={handleUpdateCustomer}
+                                className="flex-1 px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 shadow-md transition-colors"
+                            >
+                                حفظ التعديلات
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Test Bot Modal */}
+            {showTestBot && (
+                <div className="fixed inset-0 z-[100] bg-black/60 p-4 md:p-12 flex justify-center items-center backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="w-full max-w-lg h-[90vh] bg-white dark:bg-gray-900 rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] relative flex flex-col border border-white/20">
+                        <button 
+                            onClick={() => setShowTestBot(false)} 
+                            className="absolute top-4 left-4 z-50 w-10 h-10 bg-red-500 hover:bg-red-600 transition shadow-lg rounded-full text-white flex justify-center items-center font-bold text-xl"
+                        >
+                            ✕
+                        </button>
+                        <div className="h-full pointer-events-auto">
+                            <BotInterface 
+                                customer={{ 
+                                    id: 'test_mode', 
+                                    name: 'حساب تجريبي (التدريب)', 
+                                    contractNumber: 'TEST', 
+                                    systemType: activeSystemType, 
+                                    isActive: true, 
+                                    createdAt: Date.now() 
+                                }} 
+                                onSessionEnd={() => setShowTestBot(false)}
+                                onAdminClick={() => {}}
+                                onBack={() => setShowTestBot(false)}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Chunks Editor Modal */}
+            {showChunksModal && (
+                <div className="fixed inset-0 z-[110] bg-black/60 p-4 md:p-8 flex justify-center items-center backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="w-full max-w-4xl h-[85vh] bg-gray-50 dark:bg-gray-900 rounded-3xl overflow-hidden shadow-2xl relative flex flex-col border border-gray-200 dark:border-gray-800">
+                        {/* Header */}
+                        <div className="flex justify-between items-center p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                            <h2 className="text-xl font-bold flex items-center gap-2 text-gray-800 dark:text-white">
+                                <span>👓</span> محرر الذواكر الدقيق ({activeSystemType})
+                            </h2>
+                            <button 
+                                onClick={() => setShowChunksModal(false)}
+                                className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 flex items-center justify-center hover:bg-red-500 hover:text-white transition"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        
+                        {/* Body */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
+                            {chunksToEdit.length === 0 ? (
+                                <p className="text-center text-gray-500 dark:text-gray-400 mt-10">لا توجد فقرات محفوظة في ذاكرة هذا النظام.</p>
+                            ) : (
+                                chunksToEdit.map((chunk, idx) => (
+                                    <div key={chunk.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-xs font-bold text-gray-400">فقرة #{idx + 1}</span>
+                                            <div className="flex gap-2">
+                                                {editingChunkId !== chunk.id ? (
+                                                    <button 
+                                                        onClick={() => { setEditingChunkId(chunk.id); setEditingChunkText(chunk.text); }}
+                                                        className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 px-3 py-1 rounded"
+                                                    >
+                                                        تعديل
+                                                    </button>
+                                                ) : (
+                                                    <>
+                                                        <button 
+                                                            onClick={() => setEditingChunkId(null)}
+                                                            className="text-xs bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 px-3 py-1 rounded"
+                                                        >
+                                                            إلغاء
+                                                        </button>
+                                                        <button 
+                                                            onClick={handleSaveChunkEdit}
+                                                            disabled={isSavingChunk}
+                                                            className="text-xs bg-green-500 text-white hover:bg-green-600 disabled:opacity-50 px-3 py-1 rounded font-bold"
+                                                        >
+                                                            {isSavingChunk ? 'يتم الترميز..' : 'حفظ'}
+                                                        </button>
+                                                    </>
+                                                )}
+                                                <button 
+                                                    onClick={() => handleDeleteChunk(chunk.id)}
+                                                    className="text-xs bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 px-3 py-1 rounded"
+                                                >
+                                                    حذف
+                                                </button>
+                                            </div>
+                                        </div>
+                                        {editingChunkId === chunk.id ? (
+                                            <textarea 
+                                                value={editingChunkText}
+                                                onChange={(e) => setEditingChunkText(e.target.value)}
+                                                className="w-full h-32 p-3 bg-gray-50 dark:bg-gray-700 border border-blue-300 dark:border-blue-600 rounded outline-none text-sm text-gray-800 dark:text-gray-200"
+                                            />
+                                        ) : (
+                                            <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{chunk.text}</p>
+                                        )}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

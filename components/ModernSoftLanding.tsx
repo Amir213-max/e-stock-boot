@@ -267,8 +267,8 @@ const ModernSoftLanding: React.FC<ModernSoftLandingProps> = ({ onOpenChat, isDar
                 <button
                   onClick={() => {
                     const message = `أنا مهتم بمنتج: ${product.name}`;
-                    const url = `https://wa.me/${config.whatsappNumber}?text=${encodeURIComponent(message)}`;
-                    window.open(url, '_blank');
+                    const url = `tel:01272000075`;
+                    window.open(url, '_self');
                   }}
                   className="w-full py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-lg font-bold hover:bg-[#25D366] dark:hover:bg-[#25D366] transition-colors text-sm flex items-center justify-center gap-2"
                 >

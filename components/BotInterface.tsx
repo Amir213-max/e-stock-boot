@@ -1,8 +1,38 @@
-
 import React, { useEffect, useRef, useState, useLayoutEffect } from 'react';
 import { GoogleGenAI, Type, FunctionDeclaration, Chat } from '@google/genai';
 import { db } from '../services/db';
 import { ChatLog, Customer } from '../types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
+// Markdown custom styles renderer
+const MarkdownRenderer = ({ content }: { content: string }) => {
+    return (
+        <div className="markdown-body text-sm sm:text-base leading-relaxed space-y-2">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                    ul: ({ node, ...props }) => <ul className="list-disc list-outside mb-3 mr-5" {...props} />,
+                    ol: ({ node, ...props }) => <ol className="list-decimal list-outside mb-3 mr-5" {...props} />,
+                    li: ({ node, ...props }) => <li className="mb-1" {...props} />,
+                    strong: ({ node, ...props }) => <strong className="font-bold !text-inherit" {...props} />,
+                    h1: ({ node, ...props }) => <h1 className="text-xl font-bold mt-4 mb-2 pb-1 border-b border-gray-200/50" {...props} />,
+                    h2: ({ node, ...props }) => <h2 className="text-lg font-bold mt-3 mb-2" {...props} />,
+                    h3: ({ node, ...props }) => <h3 className="text-base font-bold mt-2 mb-1" {...props} />,
+                    code: ({ node, inline, className, children, ...props }: any) =>
+                        inline ?
+                            <code className="bg-blue-500/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded-md text-[0.9em] font-mono font-semibold" dir="ltr" {...props}>{children}</code> :
+                            <pre className="bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700/50 p-4 rounded-xl my-3 overflow-x-auto shadow-sm backdrop-blur-sm" dir="ltr"><code className="text-[0.9em] font-mono text-gray-800 dark:text-gray-200" {...props}>{children}</code></pre>,
+                    a: ({ node, ...props }) => <a className="underline font-semibold hover:opacity-80" target="_blank" rel="noopener noreferrer" {...props} />,
+                    blockquote: ({ node, ...props }) => <blockquote className="border-r-4 border-gray-300 dark:border-gray-600 pr-3 py-1 my-2 bg-gray-50/50 dark:bg-gray-800/30 rounded-l" {...props} />
+                }}
+            >
+                {content}
+            </ReactMarkdown>
+        </div>
+    );
+};
 
 interface Message {
     id: string;
@@ -10,7 +40,46 @@ interface Message {
     text: string;
     image?: string; // URL for display
     timestamp: Date;
+    isTyping?: boolean;
 }
+
+// Typewriter Component for Streaming effect
+const TypewriterText = ({ text, onComplete }: { text: string, onComplete: () => void }) => {
+    const [displayed, setDisplayed] = useState('');
+    const scrollRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        let i = 0;
+        setDisplayed('');
+        
+        const interval = setInterval(() => {
+            setDisplayed(text.substring(0, i));
+            i += 2; // Speed up typing
+            
+            // Auto scroll container if needed during typing
+            if (scrollRef.current) {
+                scrollRef.current.scrollIntoView({ behavior: 'auto' });
+            }
+
+            if (i > text.length + 1) {
+                clearInterval(interval);
+                onComplete();
+            }
+        }, 15);
+        
+        return () => clearInterval(interval);
+    }, [text, onComplete]);
+    
+    return (
+        <div className="w-full break-words relative">
+            <MarkdownRenderer content={displayed} />
+            {displayed.length < text.length && (
+                <span className="inline-block w-1.5 h-4 bg-current opacity-70 animate-pulse align-middle rounded-full mb-1"></span>
+            )}
+            <div ref={scrollRef} />
+        </div>
+    );
+};
 
 interface BotInterfaceProps {
     customer: Customer | null;
@@ -47,8 +116,55 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
     const systemInstructionRef = useRef<string>('');
     const toolsRef = useRef<any[]>([]);
 
-    // Smart Robot Icon (SVG Data URI) - Replaced with Modern Soft Logo
-    const ROBOT_ICON = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23F7941D'/%3E%3Cpath d='M20 30 Q 50 15 80 30 V 75 Q 50 90 20 75 Z' fill='white' opacity='0.2'/%3E%3Ctext x='50' y='65' font-size='45' font-weight='bold' font-family='serif' text-anchor='middle' fill='white'%3EMS%3C/text%3E%3C/svg%3E";
+    // Smart Robot Icon with dynamic colors based on SystemType
+    const getSystemTheme = () => {
+        const sysType = customer?.systemType;
+        if (sysType === 'e-Stock Pharmacy') {
+            return {
+                iconColor: '%2310B981',
+                bubble: 'bg-gradient-to-l from-emerald-600 to-emerald-700',
+                header: 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white',
+                accent: 'text-emerald-600',
+                btn: 'bg-emerald-600 hover:bg-emerald-700',
+                ring: 'focus:ring-emerald-500',
+                isColoredHeader: true
+            };
+        }
+        if (sysType === 'e-Stock Retail') {
+            return {
+                iconColor: '%23F4A261',
+                bubble: 'bg-gradient-to-l from-orange-400 to-orange-500',
+                header: 'bg-gradient-to-r from-orange-400 to-orange-500 text-white',
+                accent: 'text-orange-500',
+                btn: 'bg-orange-500 hover:bg-orange-600',
+                ring: 'focus:ring-orange-400',
+                isColoredHeader: true
+            };
+        }
+        if (sysType === 'Pharma Store') {
+            return {
+                iconColor: '%233B82F6',
+                bubble: 'bg-gradient-to-l from-blue-600 to-blue-700',
+                header: 'bg-gradient-to-r from-blue-600 to-blue-700 text-white',
+                accent: 'text-blue-600',
+                btn: 'bg-blue-600 hover:bg-blue-700',
+                ring: 'focus:ring-blue-500',
+                isColoredHeader: true
+            };
+        }
+        return {
+            iconColor: '%23F7941D',
+            bubble: 'bg-gradient-to-l from-blue-600 to-blue-700',
+            header: 'bg-white/95 dark:bg-gray-800/95 text-gray-800 dark:text-gray-100',
+            accent: 'text-blue-600',
+            btn: 'bg-blue-600 hover:bg-blue-700',
+            ring: 'focus:ring-blue-500',
+            isColoredHeader: false
+        };
+    };
+
+    const theme = getSystemTheme();
+    const ROBOT_ICON = `data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='${theme.iconColor}'/%3E%3Cpath d='M20 30 Q 50 15 80 30 V 75 Q 50 90 20 75 Z' fill='white' opacity='0.2'/%3E%3Ctext x='50' y='65' font-size='45' font-weight='bold' font-family='serif' text-anchor='middle' fill='white'%3EMS%3C/text%3E%3C/svg%3E`;
 
     // Auto-scroll to bottom
     useLayoutEffect(() => {
@@ -129,11 +245,12 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
         initialized.current = true;
 
         const initChat = async () => {
-            if (!process.env.API_KEY) {
+            const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || "";
+            if (!apiKey) {
                 setMessages([{
                     id: 'error',
                     role: 'model',
-                    text: 'عذراً، لم يتم العثور على مفتاح API. يرجى التحقق من الإعدادات.',
+                    text: 'عذراً، لم يتم العثور على مفتاح API (VITE_GEMINI_API_KEY). يرجى التحقق من ملف .env.local.',
                     timestamp: new Date()
                 }]);
                 return;
@@ -141,26 +258,19 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
 
             try {
                 // Load documentation and config asynchronously
-                const manualDocs = await db.getDocs();
-                const snippets = await db.getSnippets();
+                const sysType = customer?.systemType || 'e-Stock Pharmacy';
+                const menusText = await db.getMenus(sysType);
+                const snippets = await db.getSnippets(sysType);
                 const landingConfig = await db.getLandingConfig();
-
-                // Truncate documentation if it's too large to prevent Payload Too Large errors
-                const MAX_CONTEXT_LENGTH = 150000;
-                let safeDocs = manualDocs || "";
-                if (safeDocs.length > MAX_CONTEXT_LENGTH) {
-                    console.warn("System instructions too large, truncating...");
-                    safeDocs = safeDocs.substring(0, MAX_CONTEXT_LENGTH) + "\n...[TRUNCATED_FOR_SIZE]...";
-                }
 
                 let snippetsInstruction = '';
                 if (snippets.length > 0) {
                     // IMPORTANT: We tell the model these snippets are CRITICAL UPDATES
-                    snippetsInstruction = `\n\n=== 🚨 CRITICAL UPDATES & NEW KNOWLEDGE (HIGHEST PRIORITY) ===\nThe following information was manually added by the admin to train you. \n**RULE: If any information here conflicts with the system manual above, YOU MUST USE THE INFO BELOW as the correct truth.**\n`;
+                    snippetsInstruction = `\n\n=== 🚨 CRITICAL UPDATES & NEW KNOWLEDGE (HIGHEST PRIORITY) ===\nThe following information was manually added by the admin to train you. \n**RULE: If any information here conflicts with other manuals, YOU MUST USE THE INFO BELOW as the correct truth.**\n`;
                     snippets.forEach(s => {
-                        // Limit snippet text length as well
                         const content = s.content.length > 2000 ? s.content.substring(0, 2000) + '...' : s.content;
-                        snippetsInstruction += `-[ID: ${s.id}] Content: ${content} ${s.imageUrl ? '(Has Image available)' : ''}\n`;
+                        const navInfo = (s.menuName || s.screenName) ? `[Navigation Protocol: ${s.menuName ? 'القائمة الرئيسية: ' + s.menuName : ''} ${s.screenName ? ' -> الشاشة: ' + s.screenName : ''}]` : '';
+                        snippetsInstruction += `-[ID: ${s.id}] ${navInfo}\nContent: ${content} ${s.imageUrl ? '(Has Image available)' : ''}\n`;
                     });
                 }
 
@@ -174,9 +284,9 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
             Website Footer Text: ${landingConfig.footerText}
             `;
 
-                const docsInstruction = `\n\n=== E-STOCK SYSTEM DOCUMENTATION (BASE KNOWLEDGE) ===\n${safeDocs}\n${snippetsInstruction}\n${companyInfo}\n\nUse the above documentation to explain how features work in e-stock.`;
+                const docsInstruction = `\n\n=== UI SCREENS & MENUS PATHS (Navigation Guide) ===\n${menusText}\n${snippetsInstruction}\n${companyInfo}\n\nUse the menus to accurately guide the customer step by step. Answer queries strictly relevant to ${sysType} system based on RAG contexts.`;
 
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                const ai = new GoogleGenAI({ apiKey });
 
                 // --- PERSONA SETUP ---
                 const clientName = customer?.name || "عميل غير معروف";
@@ -184,15 +294,17 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     ? `Client Name: ${customer.name}\nContract Number: ${customer.contractNumber}\nPrevious Logins: ${new Date(Number(customer.lastLogin)).toLocaleDateString()}`
                     : "Client: Guest/Unknown";
 
-                const systemInstruction = `You are "E-stock Bot" (مساعد إي ستوك), a dedicated and expert TECHNICAL SUPPORT agent for Modern Soft.
+                const systemInstruction = `You are "E-stock Bot" (مساعد إي ستوك), a dedicated and expert TECHNICAL SUPPORT agent for Modern Soft. Your specific assignment is to support users of the **${sysType}** software.
                     
                     **YOUR IDENTITY & TONE:**
                     - You are a smart, friendly, and expert support agent.
                     - **Language**: Speak strictly in **Egyptian Arabic (Masri)**. Use natural phrases like: "من عيوني", "تحت أمرك", "يا فندم", "بسيطة خالص".
                     - **Attitude**: Helpful, patient, and knowledgeable. Always acknowledge the user's problem first.
+                    - **System Focus**: You ONLY support ${sysType}. If a screen or feature does not exist in the provided ${sysType} documentation below, tell the user gracefully that it does not exist in this system, without mentioning other systems.
                     
                     **KNOWLEDGE BASE USAGE:**
                     - Your knowledge base now contains **Structured Q&A** sections.
+                    - **Navigation Paths**: If a snippet contains "القائمة الرئيسية" or "الشاشة", prioritize mentioning these paths clearly to the user (e.g., "اتفضل يا فندم، هتدخل على قائمة [اسم القائمة] وتختار شاشة [اسم الشاشة]").
                     - **Strategy**: First, scan the docs for a "Q: [User Question]" that matches the user's intent. If found, use the provided "A: [Answer]" as your core response.
                     - **Style**: Convert the stiff documentation into a warm, helpful conversation.
                     - **Steps**: When giving instructions, ALWAYS use numbered lists (1. 2. 3.) for clarity.
@@ -204,7 +316,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     
                     **INTERACTION RULES:** 
                     - **Greeting**:  If the customer name is known (${clientName}), welcome them warmly.
-                    - **Unknowns**: If the info is completely missing from your docs, say: "للاسف المعلومة دي مش موجودة عندي حالياً، ممكن تتواصل مع الدعم الفني عشان يفيدوك أكتر." provide the phone number.
+                    - **Unknowns**: If the info is completely missing from your docs, say: "للاسف المعلومة دي مش موجودة عندي حالياً بخصوص برنامج ${sysType}، ممكن تتواصل مع الدعم الفني عشان يفيدوك أكتر." provide the phone number.
 
                     ${docsInstruction}`;
 
@@ -276,6 +388,11 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
     };
 
     const handleSecretLogoClick = () => {
+        // Restriction: Only account 'hatem' can access the secret admin panel
+        if (customer?.name.toLowerCase() !== 'hatem') {
+            return;
+        }
+
         const newCount = logoClicks + 1;
         setLogoClicks(newCount);
 
@@ -310,55 +427,40 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
     };
 
     // Wrapper function for Gemini API calls - routes to direct call (DEV) or API route (production)
-    const sendMessageToGemini = async (params: { message: any; functionCalls?: any[] }): Promise<{ text: string; functionCalls?: any[] }> => {
-        // Local development: use direct Gemini API call
-        if (import.meta.env.DEV) {
-            if (!chatRef.current) {
-                throw new Error("Chat not initialized");
+    const sendMessageToGemini = async (params: { message: any; functionCalls?: any[] }, retries = 2): Promise<{ text: string; functionCalls?: any[] }> => {
+        let attempt = 0;
+        let lastError: any = null;
+
+        while (attempt <= retries) {
+            try {
+                if (!chatRef.current) {
+                    throw new Error("Chat not initialized");
+                }
+                return await chatRef.current.sendMessage({ message: params.message });
+            } catch (error: any) {
+                lastError = error;
+                attempt++;
+                console.warn(`[API] محاولة الاتصال ${attempt} فشلت بسبب الضغط، جاري إعادة المحاولة...`, error.message);
+                
+                // لا تقم بإعادة المحاولة إذا كان الخطأ بسبب نفاد الرصيد (Quota/429) لأنها ستفشل حتماً
+                if (error.message && (error.message.includes('429') || error.message.toLowerCase().includes('quota') || error.message.includes('RESOURCE_EXHAUSTED'))) {
+                    throw error;
+                }
+
+                if (attempt <= retries) {
+                    await new Promise(res => setTimeout(res, 1000 * attempt));
+                }
             }
-            return await chatRef.current.sendMessage({ message: params.message });
         }
-
-        // Production: use API route
-        try {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    message: params.message,
-                    systemInstruction: systemInstructionRef.current,
-                    tools: toolsRef.current,
-                }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            return {
-                text: data.text || '',
-                functionCalls: data.functionCalls || undefined
-            };
-        } catch (error) {
-            console.error('API Route Error:', error);
-            throw error;
-        }
+        
+        console.error('[API] فشل الاتصال نهائياً بعد استنفاد المحاولات:', lastError);
+        throw lastError;
     };
 
     const handleSend = async (e?: React.FormEvent) => {
         e?.preventDefault();
         if ((!input.trim() && !selectedImage) || isLoading || isEnding) return;
-        // In production, we don't need chatRef.current, but in DEV we do
-        if (import.meta.env.DEV && !chatRef.current) {
-            alert("جاري الاتصال بالنظام، يرجى الانتظار قليلاً...");
-            return;
-        }
-        // In production, check if we have system instruction (chat initialized)
-        if (!import.meta.env.DEV && !systemInstructionRef.current) {
+        if (!chatRef.current) {
             alert("جاري الاتصال بالنظام، يرجى الانتظار قليلاً...");
             return;
         }
@@ -382,26 +484,61 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
         }]);
 
         setIsLoading(true);
-        setStatusText(currentImage ? 'جاري تحليل الصورة...' : 'جاري الكتابة...');
+        setStatusText(currentImage ? 'جاري تحليل الصورة...' : 'جاري البحث في الدليل...');
 
         try {
-            let messagePayload: any = userText;
+            let contextParts = "";
+            const sysType = customer?.systemType || 'e-Stock Pharmacy';
+
+            // 1. RAG Search: Get similar chunks
+            if (userText && userText.length > 3) {
+                try {
+                    const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "";
+                    const ai = new GoogleGenAI({ apiKey });
+                    const embResponse = await ai.models.embedContent({
+                        model: 'gemini-embedding-2',
+                        contents: userText
+                    });
+                    
+                    if (embResponse.embeddings?.[0]?.values) {
+                        const similarChunks = await db.searchSimilarChunks(embResponse.embeddings[0].values, sysType);
+                        if (similarChunks.length > 0) {
+                            contextParts = "\n\n=== RELEVANT DOCUMENTATION CONTEXT ===\n" + 
+                                similarChunks.map(c => c.text).join("\n---\n") + 
+                                "\n====================================\n";
+                        }
+                    }
+                } catch (ragErr) {
+                    console.error("RAG Search failed, falling back to basic chat", ragErr);
+                }
+            }
+
+            setStatusText('جاري الكتابة...');
+
+            let messagePayload: any = contextParts ? contextParts + "\n\nUser Question: " + userText : userText;
 
             // Construct payload if image exists
             if (currentImage) {
                 const base64Data = await fileToBase64(currentImage);
-                messagePayload = [
-                    {
-                        inlineData: {
-                            mimeType: currentImage.type,
-                            data: base64Data
-                        }
+                const imagePart = {
+                    inlineData: {
+                        mimeType: currentImage.type,
+                        data: base64Data
                     }
-                ];
-                if (userText) {
-                    messagePayload.push({ text: userText });
+                };
+                
+                if (contextParts) {
+                    // Complex payload: array with context, image, and text
+                    messagePayload = [
+                        { text: contextParts },
+                        imagePart,
+                        { text: userText || "Analyze this image." }
+                    ];
                 } else {
-                    messagePayload.push({ text: "Please analyze this image in the context of e-stock system and explain what is shown or solve the error." });
+                    messagePayload = [
+                        imagePart,
+                        { text: userText || "Please analyze this image in the context of e-stock system." }
+                    ];
                 }
             }
 
@@ -448,7 +585,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                         }
                     } else if (call.name === 'show_knowledge_image') {
                         const snippetId = args.snippet_id;
-                        const snippets = await db.getSnippets();
+                        const snippets = await db.getSnippets(customer?.systemType);
                         const snippet = snippets.find(s => s.id === snippetId);
 
                         if (snippet && snippet.imageUrl) {
@@ -493,16 +630,27 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     id: Date.now().toString(),
                     role: 'model',
                     text: modelText,
+                    isTyping: true, // Enable typing effect
                     timestamp: new Date()
                 }]);
             }
 
-        } catch (error) {
-            console.error(error);
+        } catch (error: any) {
+            console.error("Gemini Error:", error);
+            const errorMessage = error.message || '';
+            
+            let friendlyMessage = 'عذراً، أواجه مشكلة بسيطة في الاتصال بالخادم الآن. ممكن تحاول تاني؟ 🔄';
+            
+            // التعامل مع رسالة استنفاد الرصيد/الضغط بشكل لطيف ومخفي عن العميل
+            if (errorMessage.includes('429') || errorMessage.toLowerCase().includes('quota') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+                friendlyMessage = 'عذراً، أواجه ضغطاً كبيراً في الطلبات حالياً ⏳\nيرجى الانتظار دقيقة والمحاولة مرة أخرى، أو التواصل مع الدعم الفني هاتفياً للحصول على مساعدة فورية.';
+            }
+
             setMessages(prev => [...prev, {
                 id: Date.now().toString(),
                 role: 'model',
-                text: 'معلش في مشكلة بسيطة في الاتصال، ممكن تحاول تاني؟',
+                text: friendlyMessage,
+                isTyping: true,
                 timestamp: new Date()
             }]);
         } finally {
@@ -519,15 +667,19 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
             let extractedName = "زائر";
             let summary = "محادثة عامة";
 
-            if ((chatRef.current || systemInstructionRef.current) && messages.length > 1) {
+            let isUnanswered = false;
+
+            // توفير الطلبات: لا نرسل طلب للذكاء الاصطناعي للتلخيص إلا إذا كان هناك محادثة فعلية (أكثر من رسالتين)
+            if ((chatRef.current || systemInstructionRef.current) && messages.length > 2) {
                 const analysisPrompt = `
              SYSTEM_INTERNAL_REQUEST:
              The session is ending. Please analyze the entire conversation history above.
              1. Extract the user's name if they mentioned it (e.g., "I am Ahmed", "My name is..."). If not found, use "Unknown Client".
              2. Create a very brief summary (one sentence) of the technical issue they asked about.
-             
+             3. Determine if the bot failed to answer a question properly (e.g., it said it didn't know, or said "المعلومة دي مش موجودة"). Set unanswered to true or false.
+
              Return ONLY a JSON object:
-             { "clientName": "...", "summary": "..." }
+             { "clientName": "...", "summary": "...", "unanswered": boolean }
              `;
 
                 try {
@@ -541,6 +693,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                         const data = JSON.parse(jsonMatch[0]);
                         extractedName = data.clientName || "زائر";
                         summary = data.summary || "محادثة دعم فني";
+                        isUnanswered = !!data.unanswered;
                     }
                 } catch (e) {
                     console.warn("Failed to extract session details via AI, using defaults.", e);
@@ -557,7 +710,9 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     return `${role}: ${m.text}${imgTag}`;
                 }).join('\n\n'),
                 botResponse: summary,
-                clientName: extractedName
+                clientName: extractedName,
+                isUnanswered: isUnanswered,
+                systemType: customer?.systemType
             };
 
             await db.addLog(fullLog);
@@ -590,11 +745,11 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
     return (
         <div className="flex flex-col h-full w-full bg-white dark:bg-gray-800 sm:shadow-2xl sm:rounded-2xl rounded-none overflow-hidden border-0 sm:border border-gray-200 dark:border-gray-700 font-sans relative transition-colors duration-300">
             {/* Header */}
-            <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-md p-3 sm:p-4 flex justify-between items-center text-gray-800 dark:text-gray-100 shadow-sm border-b border-gray-100 dark:border-gray-700 z-10 shrink-0">
+            <div className={`${theme.header} backdrop-blur-md p-3 sm:p-4 flex justify-between items-center shadow-md z-10 shrink-0`}>
                 <div className="flex items-center space-x-3 space-x-reverse">
                     <button
                         onClick={onBack}
-                        className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white transition-colors"
+                        className={`p-2 rounded-full transition-colors ${theme.isColoredHeader ? 'hover:bg-white/20 text-white' : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800'}`}
                         title="العودة للصفحة الرئيسية"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
@@ -617,11 +772,11 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     >
                         <h2 className="font-bold text-base sm:text-lg leading-tight flex items-center gap-1">
                             E-stock chat
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-blue-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className={`w-4 h-4 ${theme.isColoredHeader ? 'text-white' : 'text-blue-500'}`}>
                                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
                             </svg>
                         </h2>
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400">متصل الآن • يرد فوراً</p>
+                        <p className={`text-[11px] ${theme.isColoredHeader ? 'text-white/80' : 'text-gray-500 dark:text-gray-400'}`}>متصل الآن • يرد فوراً</p>
                     </div>
                 </div>
 
@@ -629,7 +784,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     <button
                         onClick={endSession}
                         disabled={isEnding || isLoading}
-                        className="text-xs sm:text-sm bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 px-3 py-2 rounded-lg transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        className={`text-xs sm:text-sm px-3 py-2 rounded-lg transition-all font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 ${theme.isColoredHeader ? 'bg-white/20 hover:bg-white/30 text-white border border-white/30' : 'bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400'}`}
                     >
                         {isEnding ? 'جاري الحفظ...' : 'إنهاء'}
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
@@ -713,7 +868,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                                 {/* Bubble */}
                                 <div
                                     className={`relative px-4 py-2 sm:px-5 sm:py-3 shadow-sm text-sm sm:text-base leading-relaxed break-words ${isUser
-                                        ? 'bg-gradient-to-l from-blue-600 to-blue-700 text-white rounded-2xl rounded-br-none'
+                                        ? `${theme.bubble} text-white rounded-2xl rounded-br-none`
                                         : 'bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 border border-gray-100 dark:border-gray-600 rounded-2xl rounded-bl-none'
                                         }`}
                                 >
@@ -727,15 +882,26 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                                         </div>
                                     )}
                                     {msg.text && (
-                                        <div className="whitespace-pre-wrap">
-                                            {msg.text}
-                                        </div>
+                                        msg.isTyping ? (
+                                            <TypewriterText 
+                                                text={msg.text} 
+                                                onComplete={() => {
+                                                    setMessages(prev => prev.map(m => 
+                                                        m.id === msg.id ? { ...m, isTyping: false } : m
+                                                    ));
+                                                }} 
+                                            />
+                                        ) : (
+                                            <div className="w-full break-words">
+                                                <MarkdownRenderer content={msg.text} />
+                                            </div>
+                                        )
                                     )}
                                     {/* Timestamp */}
-                                    <div className={`text-[10px] mt-1 flex items-center gap-1 ${isUser ? 'text-blue-100 justify-start' : 'text-gray-400 dark:text-gray-400 justify-end'}`}>
+                                    <div className={`text-[10px] mt-1 flex items-center gap-1 ${isUser ? 'text-white/80 justify-start' : 'text-gray-400 dark:text-gray-400 justify-end'}`}>
                                         <span>{formatTime(new Date(msg.timestamp))}</span>
                                         {isUser && (
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-blue-200">
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-white/60">
                                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                             </svg>
                                         )}
@@ -759,9 +925,9 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                             </div>
                             <div className="bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100 border border-gray-100 dark:border-gray-600 rounded-2xl rounded-bl-none p-4 shadow-sm flex items-center gap-3">
                                 <div className="flex space-x-1 space-x-reverse items-center h-full pt-1">
-                                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                    <div className={`w-2 h-2 ${theme.btn} rounded-full animate-bounce`} style={{ animationDelay: '0ms' }}></div>
+                                    <div className={`w-2 h-2 ${theme.btn} rounded-full animate-bounce`} style={{ animationDelay: '150ms' }}></div>
+                                    <div className={`w-2 h-2 ${theme.btn} rounded-full animate-bounce`} style={{ animationDelay: '300ms' }}></div>
                                 </div>
                                 <span className="text-xs text-gray-400 animate-pulse font-medium">{statusText}</span>
                             </div>
@@ -804,7 +970,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                         </div>
                     )}
 
-                    <div className="flex items-end gap-2 bg-gray-100 dark:bg-gray-700 rounded-[2rem] p-1.5 pr-2 focus-within:bg-white dark:focus-within:bg-gray-800 focus-within:ring-2 focus-within:ring-blue-100 dark:focus-within:ring-blue-900 focus-within:shadow-lg transition-all border border-transparent focus-within:border-blue-200 dark:focus-within:border-blue-700">
+                    <div className={`flex items-end gap-2 bg-gray-100 dark:bg-gray-700 rounded-[2rem] p-1.5 pr-2 focus-within:bg-white dark:focus-within:bg-gray-800 focus-within:ring-2 ${theme.ring} focus-within:shadow-lg transition-all border border-transparent`}>
 
                         {/* File Attachment Button */}
                         <input
@@ -818,7 +984,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                         <button
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
-                            className={`p-2.5 rounded-full transition-all duration-200 ${selectedImage ? 'bg-blue-100 text-blue-600' : 'text-gray-400 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                            className={`p-2.5 rounded-full transition-all duration-200 ${selectedImage ? `bg-gray-200 ${theme.accent}` : 'text-gray-400 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
                             title="رفع صورة"
                             disabled={isLoading || isEnding}
                         >
@@ -854,7 +1020,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                             disabled={(!input.trim() && !selectedImage) || isLoading || isEnding}
                             className={`p-3 rounded-full flex items-center justify-center transition-all duration-200 ${(!input.trim() && !selectedImage) || isLoading || isEnding
                                 ? 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                                : 'bg-blue-600 text-white hover:bg-blue-700 hover:scale-105 shadow-md active:scale-95'
+                                : `${theme.btn} text-white hover:scale-105 shadow-md active:scale-95`
                                 }`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 transform rotate-180">

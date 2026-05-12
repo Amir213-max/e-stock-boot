@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
-import { KBItem, ChatLog, Feedback, KnowledgeSnippet } from '../types';
+import { KBItem, ChatLog, Feedback, KnowledgeSnippet, Customer, SystemType } from '../types';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { GoogleGenAI } from '@google/genai';
 
@@ -21,22 +21,36 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const [newPassword, setNewPassword] = useState('');
     const [resetStatus, setResetStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-    const [activeTab, setActiveTab] = useState<'analytics' | 'history' | 'training'>('analytics');
+    const [activeTab, setActiveTab] = useState<'analytics' | 'history' | 'training' | 'customers'>('analytics');
     const [kbItems, setKbItems] = useState<KBItem[]>([]);
     const [logs, setLogs] = useState<ChatLog[]>([]);
     const [feedback, setFeedback] = useState<Feedback[]>([]);
     const [docsLength, setDocsLength] = useState<number>(0);
+    const [selectedSystemType, setSelectedSystemType] = useState<SystemType>('e-Stock Pharmacy');
+
+    // Customer Management State
+    const [customers, setCustomers] = useState<Customer[]>([]);
+    const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({
+        name: '',
+        contractNumber: '',
+        systemType: 'e-Stock Pharmacy',
+        isActive: true
+    });
+    const [searchQuery, setSearchQuery] = useState('');
 
     // Knowledge Snippet State
     const [snippets, setSnippets] = useState<KnowledgeSnippet[]>([]);
     const [snippetText, setSnippetText] = useState('');
     const [snippetImage, setSnippetImage] = useState<string | null>(null);
+    const [snippetSystemType, setSnippetSystemType] = useState<SystemType | 'All'>('All');
 
     // PDF Upload State
     const [pdfUploading, setPdfUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState('');
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [uploadSuccess, setUploadSuccess] = useState(false);
+    const [cloudStatus, setCloudStatus] = useState<'checking' | 'connected' | 'error'>('checking');
+    const [cloudError, setCloudError] = useState<string | null>(null);
 
     const pdfInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +59,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         if (isAuthenticated) {
             refreshData();
         }
-    }, [isAuthenticated]);
+    }, [isAuthenticated, activeTab, selectedSystemType]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -85,17 +99,63 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     };
 
     const refreshData = async () => {
+        // Test connection
+        const conn = await db.testCloudConnection();
+        if (conn.success) {
+            setCloudStatus('connected');
+            setCloudError(null);
+        } else {
+            setCloudStatus('error');
+            setCloudError(conn.error || 'Unknown error');
+        }
+
         const kb = await db.getKB();
         const l = await db.getLogs();
         const f = await db.getFeedback();
-        const dLen = await db.getDocLength();
-        const s = await db.getSnippets();
+        const dLen = await db.getDocLength(selectedSystemType);
+        const s = await db.getSnippets(selectedSystemType === 'e-Stock Pharmacy' ? undefined : selectedSystemType); 
+        // Note: getSnippets(undefined) returns all, we might want to filter or fetch based on tab.
+        // For now, let's fetch customers too.
+        const c = await db.getCustomers();
 
         setKbItems(kb);
         setLogs(l);
         setFeedback(f);
         setDocsLength(dLen);
         setSnippets(s);
+        setCustomers(c);
+    };
+
+    const handleAddCustomer = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newCustomer.name || !newCustomer.contractNumber) return;
+
+        const customer: Customer = {
+            id: Date.now().toString(),
+            name: newCustomer.name,
+            contractNumber: newCustomer.contractNumber,
+            systemType: newCustomer.systemType as SystemType,
+            isActive: true,
+            createdAt: Date.now()
+        };
+
+        await db.saveCustomer(customer);
+        alert('تمت إضافة العميل بنجاح');
+        setNewCustomer({ name: '', contractNumber: '', systemType: 'e-Stock Pharmacy', isActive: true });
+        refreshData();
+    };
+
+    const toggleCustomerStatus = async (customer: Customer) => {
+        const updated = { ...customer, isActive: !customer.isActive };
+        await db.saveCustomer(updated);
+        refreshData();
+    };
+
+    const handleDeleteCustomer = async (id: string) => {
+        if (window.confirm('هل أنت متأكد من حذف هذا العميل؟')) {
+            await db.deleteCustomer(id);
+            refreshData();
+        }
     };
 
     const handleSnippetImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,15 +176,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const handleAddSnippet = async () => {
         if (!snippetText.trim()) return;
 
-        const newSnippet: KnowledgeSnippet = {
+        const snippet: KnowledgeSnippet = {
             id: Date.now().toString(),
             content: snippetText,
             imageUrl: snippetImage || undefined,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            systemType: snippetSystemType
         };
 
-        await db.addSnippet(newSnippet);
-        setSnippets([newSnippet, ...snippets]);
+        await db.addSnippet(snippet);
+        setSnippets([snippet, ...snippets]);
         setSnippetText('');
         setSnippetImage(null);
         if (imageInputRef.current) imageInputRef.current.value = '';
@@ -210,8 +271,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                 throw new Error("مفتاح API غير موجود. لا يمكن تحليل الملف.");
             }
 
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const model = ai.chats.create({ model: 'gemini-2.5-flash' });
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY, apiVersion: 'v1' });
+            const model = ai.chats.create({ model: 'gemini-1.5-flash' });
 
             const analysisPrompt = `
             Act as a **Senior Knowledge Engineer** for "Modern Soft". Your task is to process the following raw documentation into a **High-Quality, Agent-Ready Knowledge Base**.
@@ -241,11 +302,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
             if (!processedContent) throw new Error("فشل الذكاء الاصطناعي في تحليل الملف.");
 
             // Append PROCESSED content to existing docs
-            const currentDocs = await db.getDocs();
+            const currentDocs = await db.getDocs(selectedSystemType);
             const separator = currentDocs ? "\n\n================================\n" : "";
             const finalDocs = currentDocs + separator + `📚 **source:** ${file.name} (Processed by AI)\n` + processedContent;
 
-            await db.saveDocs(finalDocs);
+            await db.saveDocs(finalDocs, selectedSystemType);
             setDocsLength(finalDocs.length);
 
             setUploadSuccess(true);
@@ -263,9 +324,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
 
     const handleClearDocs = async () => {
         if (window.confirm('⚠️ تحذير: سيتم حذف جميع المعلومات (بما في ذلك الدليل الافتراضي للمخازن) ويصبح البوت "ورقة بيضاء". هل أنت متأكد؟')) {
-            await db.resetDocs();
+            await db.resetDocs(selectedSystemType);
             setDocsLength(0);
-            alert('✅ تم حذف جميع المعلومات بنجاح.');
+            alert(`✅ تم حذف جميع معلومات ${selectedSystemType} بنجاح.`);
         }
     };
 
@@ -278,7 +339,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     };
 
     const handleDownloadDocs = async () => {
-        const currentDocs = await db.getDocs();
+        const currentDocs = await db.getDocs(selectedSystemType);
         // ... rest stays same, just ensuring we get everything
         const snippets = await db.getSnippets();
 
@@ -575,7 +636,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                             <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z" />
                         </svg>
                     </div>
-                    <h1 className="text-xl font-bold text-gray-800 dark:text-white tracking-tight">لوحة التحكم</h1>
+                    <div>
+                        <h1 className="text-xl font-bold text-gray-800 dark:text-white tracking-tight">لوحة التحكم</h1>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                            {cloudStatus === 'checking' && (
+                                <span className="flex items-center gap-1 text-[10px] text-gray-400 font-bold">
+                                    <span className="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></span>
+                                    جاري فحص الاتصال بالسحابة...
+                                </span>
+                            )}
+                            {cloudStatus === 'connected' && (
+                                <span className="flex items-center gap-1 text-[10px] text-green-500 font-bold">
+                                    <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                                    متصل بالسحابة (مزامنة نشطة)
+                                </span>
+                            )}
+                            {cloudStatus === 'error' && (
+                                <span className="flex items-center gap-1 text-[10px] text-red-500 font-bold group relative cursor-help">
+                                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping"></span>
+                                    خطأ في المزامنة {cloudError === 'permission-denied' ? '(صلاحيات Firestore)' : ''}
+                                    <div className="absolute bottom-full right-0 mb-2 w-48 p-2 bg-red-600 text-white text-[9px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-50 pointer-events-none">
+                                        يرجى التأكد من تفعيل Firestore في وحدة تحكم Firebase وضبط القواعد (Rules) للسماح بالقراءة والكتابة.
+                                        الخطأ: {cloudError}
+                                    </div>
+                                </span>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-4 mt-4 md:mt-0 w-full md:w-auto">
@@ -598,9 +685,35 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                         >
                             تدريب البوت (المعرفة)
                         </button>
+                        <button
+                            onClick={() => setActiveTab('customers')}
+                            className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'customers' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+                        >
+                            تراخيص العملاء
+                        </button>
                     </div>
                 </div>
             </div>
+
+            {/* System Type Selector (Contextual) */}
+            {(activeTab === 'training' || activeTab === 'analytics') && (
+                <div className="px-4 py-2 bg-blue-50/50 dark:bg-blue-900/20 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-gray-500 dark:text-gray-400">النظام المختار:</span>
+                        <div className="flex bg-gray-200 dark:bg-gray-700 p-1 rounded-lg">
+                            {(['e-Stock Pharmacy', 'e-Stock Retail', 'Pharma Store'] as SystemType[]).map(type => (
+                                <button
+                                    key={type}
+                                    onClick={() => setSelectedSystemType(type)}
+                                    className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${selectedSystemType === type ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    {type}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-600">
 
@@ -905,6 +1018,138 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                             )) : (
                                 <div className="p-12 text-center text-gray-400">لا توجد سجلات محادثات حتى الآن.</div>
                             )}
+                        </div>
+                    </div>
+                )}
+
+                {/* --- Customer Management Section --- */}
+                {activeTab === 'customers' && (
+                    <div className="space-y-6 animate-in fade-in duration-300">
+                        {/* 1. Add New Customer */}
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4">إضافة عميل جديد (منح ترخيص)</h3>
+                            <form onSubmit={handleAddCustomer} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <input
+                                    type="text"
+                                    placeholder="اسم الصيدلية / العميل"
+                                    value={newCustomer.name}
+                                    onChange={e => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                                    className="p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="رقم العقد / الكود"
+                                    value={newCustomer.contractNumber}
+                                    onChange={e => setNewCustomer({ ...newCustomer, contractNumber: e.target.value })}
+                                    className="p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100"
+                                />
+                                <select
+                                    value={newCustomer.systemType}
+                                    onChange={e => setNewCustomer({ ...newCustomer, systemType: e.target.value as SystemType })}
+                                    className="p-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-gray-700 dark:text-gray-100"
+                                >
+                                    <option value="e-Stock Pharmacy">e-Stock Pharmacy</option>
+                                    <option value="e-Stock Retail">e-Stock Retail</option>
+                                    <option value="Pharma Store">Pharma Store</option>
+                                </select>
+                                <button
+                                    type="submit"
+                                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-md"
+                                >
+                                    إضافة العميل
+                                </button>
+                            </form>
+                        </div>
+
+                        {/* 2. Customer List */}
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+                            <div className="p-4 border-b border-gray-50 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-700/30 flex justify-between items-center">
+                                <h3 className="font-bold text-gray-700 dark:text-gray-200 text-sm">قائمة العملاء النشطين</h3>
+                                <div className="flex items-center gap-3">
+                                    <input 
+                                        type="text"
+                                        placeholder="بحث بالاسم أو رقم العقد..."
+                                        value={searchQuery}
+                                        onChange={e => setSearchQuery(e.target.value)}
+                                        className="text-xs p-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg w-64 outline-none focus:ring-1 focus:ring-blue-400"
+                                    />
+                                    <button 
+                                        onClick={() => {
+                                            const exportData = customers.map(c => ({
+                                                'الاسم': c.name,
+                                                'رقم العقد': c.contractNumber,
+                                                'نوع النظام': c.systemType,
+                                                'الحالة': c.isActive ? 'نشط' : 'معطل',
+                                                'تاريخ الإضافة': new Date(c.createdAt).toLocaleDateString('ar-EG')
+                                            }));
+                                            downloadCSV(exportData, `customers_list_${new Date().toISOString().slice(0,10)}.csv`);
+                                        }}
+                                        className="text-xs flex items-center gap-1 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg font-semibold"
+                                    >
+                                        تصدير (CSV)
+                                    </button>
+                                    <button 
+                                        onClick={refreshData}
+                                        className="text-xs flex items-center gap-1 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30 px-3 py-1.5 rounded-lg font-semibold"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                        </svg>
+                                        مزامنة الآن
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-right text-sm">
+                                    <thead>
+                                        <tr className="bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                                            <th className="p-4 font-bold">الاسم</th>
+                                            <th className="p-4 font-bold">رقم العقد</th>
+                                            <th className="p-4 font-bold">نوع النظام</th>
+                                            <th className="p-4 font-bold">الحالة</th>
+                                            <th className="p-4 font-bold">تاريخ الإضافة</th>
+                                            <th className="p-4 font-bold">الإجراءات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+                                        {customers
+                                            .filter(c => c.name.includes(searchQuery) || c.contractNumber.includes(searchQuery))
+                                            .map(customer => (
+                                            <tr key={customer.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition">
+                                                <td className="p-4 font-bold text-gray-800 dark:text-gray-200">{customer.name}</td>
+                                                <td className="p-4 font-mono text-xs">{customer.contractNumber}</td>
+                                                <td className="p-4">
+                                                    <span className="text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">
+                                                        {customer.systemType}
+                                                    </span>
+                                                </td>
+                                                <td className="p-4">
+                                                    <button 
+                                                        onClick={() => toggleCustomerStatus(customer)}
+                                                        className={`px-3 py-1 rounded-full text-[10px] font-bold ${customer.isActive ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'}`}
+                                                    >
+                                                        {customer.isActive ? 'نشط' : 'معطل'}
+                                                    </button>
+                                                </td>
+                                                <td className="p-4 text-xs text-gray-400">{new Date(customer.createdAt).toLocaleDateString('ar-EG')}</td>
+                                                <td className="p-4">
+                                                    <button 
+                                                        onClick={() => handleDeleteCustomer(customer.id)}
+                                                        className="text-red-400 hover:text-red-600 transition"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                                        </svg>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                {customers.length === 0 && (
+                                    <div className="p-12 text-center text-gray-400">لا يوجد عملاء مضافين حالياً.</div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

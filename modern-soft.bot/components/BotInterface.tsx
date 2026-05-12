@@ -116,6 +116,25 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ onSessionEnd, onAdminClick,
         }
     };
 
+    const verifyLicenseTool: FunctionDeclaration = {
+        name: 'verify_customer_license',
+        description: 'Verify the customer license using their pharmacy name and contract number. Returns the status and system type.',
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                customer_name: {
+                    type: Type.STRING,
+                    description: 'The name of the customer or pharmacy.'
+                },
+                contract_number: {
+                    type: Type.STRING,
+                    description: 'The contract number or license key.'
+                }
+            },
+            required: ['customer_name', 'contract_number']
+        }
+    };
+
     useEffect(() => {
         if (initialized.current) return;
         initialized.current = true;
@@ -168,9 +187,9 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ onSessionEnd, onAdminClick,
 
                 const docsInstruction = `\n\n=== E-STOCK SYSTEM DOCUMENTATION (BASE KNOWLEDGE) ===\n${safeDocs}\n${snippetsInstruction}\n${companyInfo}\n\nUse the above documentation to explain how features work in e-stock.`;
 
-                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                const ai = new GoogleGenAI({ apiKey: process.env.API_KEY, apiVersion: 'v1' });
                 chatRef.current = ai.chats.create({
-                    model: 'gemini-2.5-flash',
+                    model: 'gemini-1.5-flash',
                     config: {
                         systemInstruction: `You are "E-stock Bot" (مساعد إي ستوك), a dedicated and expert TECHNICAL SUPPORT agent for Modern Soft.
 
@@ -196,7 +215,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ onSessionEnd, onAdminClick,
                     - **Unknowns**: If the info is completely missing from your docs, say: "للاسف المعلومة دي مش موجودة عندي حالياً، ممكن تتواصل مع الدعم الفني عشان يفيدوك أكتر." provide the phone number.
 
                     ${docsInstruction}`,
-                        tools: [{ functionDeclarations: [searchKBTool, showImageTool, showSnippetImageTool] }],
+                        tools: [{ functionDeclarations: [searchKBTool, showImageTool, showSnippetImageTool, verifyLicenseTool] }],
                     },
                 });
 
@@ -392,6 +411,30 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ onSessionEnd, onAdminClick,
                                 id: call.id
                             };
                         }
+                    } else if (call.name === 'verify_customer_license') {
+                        const name = args.customer_name;
+                        const contract = args.contract_number;
+                        const customer = await db.authenticateCustomer(name || "", contract || "");
+                        
+                        if (customer) {
+                            // If verified, we might want to fetch SPECIFIC docs for this customer type 
+                            // But for now, we just tell the AI the type.
+                            return {
+                                name: call.name,
+                                response: { 
+                                    status: "Verified", 
+                                    systemType: customer.systemType,
+                                    message: `Customer ${customer.name} is active on system ${customer.systemType}.`
+                                },
+                                id: call.id
+                            };
+                        } else {
+                            return {
+                                name: call.name,
+                                response: { status: "Invalid", message: "License not found or inactive." },
+                                id: call.id
+                            };
+                        }
                     }
                     return { name: call.name, response: { error: "Unknown function" }, id: call.id };
                 }));
@@ -418,12 +461,20 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ onSessionEnd, onAdminClick,
                 }]);
             }
 
-        } catch (error) {
-            console.error(error);
+        } catch (error: any) {
+            console.error("Gemini Error:", error);
+            const errorMessage = error.message || '';
+            
+            let friendlyMessage = 'عذراً، أواجه مشكلة بسيطة في الاتصال بالخادم الآن. ممكن تحاول تاني؟ 🔄';
+            
+            if (errorMessage.includes('429') || errorMessage.toLowerCase().includes('quota') || errorMessage.includes('RESOURCE_EXHAUSTED')) {
+                friendlyMessage = 'عذراً، أواجه ضغطاً كبيراً في الطلبات حالياً ⏳\nيرجى الانتظار دقيقة والمحاولة مرة أخرى، أو التواصل مع الدعم الفني هاتفياً للحصول على مساعدة فورية.';
+            }
+
             setMessages(prev => [...prev, {
                 id: Date.now().toString(),
                 role: 'model',
-                text: 'معلش في مشكلة بسيطة في الاتصال، ممكن تحاول تاني؟',
+                text: friendlyMessage,
                 timestamp: new Date()
             }]);
         } finally {
@@ -440,7 +491,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ onSessionEnd, onAdminClick,
             let extractedName = "زائر";
             let summary = "محادثة عامة";
 
-            if (chatRef.current && messages.length > 1) {
+            if (chatRef.current && messages.length > 2) {
                 const analysisPrompt = `
              SYSTEM_INTERNAL_REQUEST:
              The session is ending. Please analyze the entire conversation history above.

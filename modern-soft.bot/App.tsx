@@ -168,7 +168,7 @@ const App: React.FC = () => {
                         />
                     </div>
                     <div className="text-center text-xs text-gray-400 dark:text-gray-500 mt-1 sm:mt-2 py-1 flex-shrink-0 flex justify-between items-center px-4 select-none bg-gray-50 dark:bg-gray-900 sm:bg-transparent">
-                        <span>مدعوم بواسطة Gemini 2.5 Flash</span>
+                        <span>مدعوم بواسطة Gemini 1.5 Flash</span>
                     </div>
                 </div>
             </main>

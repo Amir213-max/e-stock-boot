@@ -1,5 +1,5 @@
 
-import { KBItem, ChatLog, Feedback, LandingConfig, KnowledgeSnippet } from '../types';
+import { KBItem, ChatLog, Feedback, LandingConfig, KnowledgeSnippet, Customer, AppSettings, SystemType, DocChunk, TroubleshootFlow } from '../types';
 import { app } from './firebase';
 import {
     getFirestore,
@@ -18,276 +18,65 @@ import {
 
 const dbInstance = app ? getFirestore(app) : null;
 
-// Initial System Documentation - Exhaustive Mapping from Provided Images
-const CORE_DOCS = `
-== الدليل المعتمد النهائي لنظام e-stock (Modern Soft) ==
-
-**تعليمات التشغيل للبوت:**
-1. أنت المساعد الفني الرسمي لشركة Modern Soft.
-2. ممنوع تماماً ذكر أي شاشة أو مسار غير موجود في القوائم أدناه.
-3. إذا سأل العميل "ألاقي فين كذا؟" أو "أجيب الشاشة دي منين؟"، التزم بالمسار (القائمة الرئيسية -> الشاشة الفرعية).
-4. استخدم اللهجة المصرية المحترمة والودودة.
-
----
-### 🗺️ خريطة شاشات البرنامج (بناءً على قوائم النظام)
-
-#### 1. قائمة [المخازن]
-- المخازن الداخلية للفرع.
-- تحويل أصناف بين المخازن.
-- تقرير تحويلات الأصناف بين المخازن.
-- تعديل تكلفة الأصناف الموجودة بالمخزن.
-- جرد وضبط كميات الأصناف.
-- تقرير بتعديلات كميات أصناف.
-- تقرير كميات أصناف المخازن طبقاً لتواريخ الصلاحية.
-- **تقرير كميات أصناف مخازن:** (هام جداً) لو عاوز تعرف إجمالي تكلفة الأصناف وعددها وإجمالي بيعها، ادخل الشاشة دي واعمل "بحث" عشان يظهر كل الأصناف، وبعدين اضغط "معاينة طباعة" وروح لآخر صفحة هتلاقي فيها الإجمالي بالظبط.
-- تقرير طابعة الجرد للمخزن.
-- تقرير أصناف منتهية الصلاحية فى المخزن.
-- تقرير حركة صنف فى المخزن.
-- الأرصدة الإفتتاحية للمخزن.
-- الجرد الدوري.
-- تقرير الجرد الدوري.
-
-#### 2. قائمة [الموردين]
-- قائمة الموردين (لإضافة أو تعديل مورد).
-- تقرير عن الموردين.
-- تعديل أسعار مورد.
-- تقرير أصناف مورد.
-- مقارنة أسعار صنف للموردين.
-- الأرصدة الإفتتاحية للموردين.
-- كشف حساب مورد.
-
-#### 3. قائمة [المشتريات]
-- فاتورة شراء.
-- مرتجع شراء من فاتورة.
-- مرتجع شراء بدون فاتورة.
-- تقرير ملخص فواتير المشتريات.
-- تقرير فواتير المشتريات بالأصناف.
-- تقرير حركة مشتريات صنف.
-- تقرير إجمالى المرتجعات لمورد.
-- تقرير إجمالى مشتريات و مرتجعات مورد.
-- تقرير مقارنة قيمة المشتريات طبقاً لقيمة المبيعات شهرياً.
-- تقرير بونص مشتريات الأصناف.
-- تقرير مشتريات الأصناف الضريبية.
-
-#### 4. قائمة [العملاء]
-- قائمة العملاء.
-- تقرير بالعملاء.
-- التعاقدات.
-- مناطق العملاء.
-- الأرصدة الإفتتاحية للعملاء.
-- تقرير عن العملاء بالمنطقة.
-- كشف حساب عميل.
-- تقرير مبيعات أصناف عميل.
-
-#### 5. قائمة [المبيعات]
-- فاتورة المبيعات (Alt+S).
-- مرتجع المبيعات من فاتورة.
-- إقفال الفواتير المعلقة.
-- إستبدال أصناف.
-- تقرير فواتير المبيعات عن فترة.
-- تقرير مبيعات أصناف عن فترة.
-- تقرير مرتجع المبيعات عن فترة.
-- تقرير حركة بيع الأصناف.
-- تقرير فواتير التوصيل الملغاة عن فترة.
-- تقرير حركة مبيعات صنف.
-- تقرير كميات أصناف لم تباع.
-- تقرير مبيعات الموظفين يومى.
-- تقرير مندوبين التوصيل المنزلي.
-- الكاشير.
-- تقفيل درج الكاشير.
-- تقرير تقفيل درج الكاشير.
-- مبيعات الفيزا.
-- تقرير مبيعات بالشركة المنتجة للأصناف.
-- تقرير مبيعات العملاء.
-- تقرير قيمة المبيعات باليوم.
-- تقرير بقيم أنواع المبيعات شهرى.
-- تقرير تكلفة المبيعات ونسبة الربح.
-- تقرير فواتير البيع لصاحب التعاقد.
-- تقرير إجمالى فواتير البيع لصاحب التعاقد.
-- تقرير فواتير البيع بالأصناف لصاحب التعاقد.
-- تقرير إجمالى بيع التعاقد.
-
-#### 6. قائمة [الحسابات اليومية]
-- النقدية المتاحة.
-- صرف نقدية.
-- توريد نقدية.
-- سحب نقدية من حساب البنك.
-- تقرير المصروفات النقدية.
-- تقرير توريدات النقدية.
-- تقرير تحويلات النقدية.
-- إصدار شيك.
-- استلام شيك.
-- تقفيل الشيكات المستلمة.
-- تقفيل الشيكات الصادرة.
-- تقرير الشيكات المستلمة.
-- تقرير الشيكات الصادرة.
-- تقرير شيكات البنك طبقاً لتاريخ الاستحقاق.
-
-#### 7. قائمة [الحسابات العامة]
-- شجرة الحسابات.
-- إنشاء درج الكاشير.
-- إنشاء خزينة.
-- إنشاء بنك.
-- إنشاء حساب بنكى.
-- إنشاء حساب بطاقات الإئتمان.
-- أسباب الخصم والإضافة فى الحسابات.
-- المساهمين.
-- توريد رأس المال.
-- تقرير توريدات رأس المال.
-- صرف أرباح.
-- تقرير صرف الأرباح.
-- حسابات الخصم والإضافة.
-- تقرير حسابات الخصم والإضافة.
-- تقرير أدراج الكاشيرات.
-- تقرير الخزائن.
-- تقرير الحسابات البنكية.
-- تقرير كشف حساب الخزينة أو الدرج.
-- حركة الحساب شهرى.
-- تقرير حركة الحساب الشهرى تفصيلى.
-- تقرير القيود اليومية.
-- قائمة الدخل.
-- ملخص الموقف المالى للمؤسسة.
-
-#### 8. قائمة [الطلبيات]
-- ضبط حد الطلب للأصناف.
-- إعداد طلبية.
-- كشكول النواقص.
-- تقرير أصناف وصلت حد الطلب.
-
-#### 9. قائمة [شئون العاملين]
-- الوظائف.
-- الموظفين.
-- صلاحيات الموظفين.
-- الحضور و الإنصراف.
-- تقرير الحضور و الانصراف.
-- تسجيل الغياب والاجازات.
-- تسجيل خصم الغياب للموظفين.
-- تقرير خصم الغياب.
-- حساب عمولة مندوب البيع.
-- تقرير عمولات البيع.
-- تسجيل خصم لموظف.
-- تقرير الخصومات.
-- تسجيل حوافز و بدلات موظف.
-- تقرير الحوافز والبدلات.
-- صرف سلف عاملين.
-- توريد سلف عاملين.
-- تقرير سلف العاملين.
-- ترحيل كشف المرتبات.
-- صرف رواتب الموظفين.
-- تقرير المرتبات.
-- تقرير تسجيل الدخول للبرنامج.
-
-#### 10. قائمة [رئيسى وفروع]
-- فروع المؤسسة.
-- تحديث بيانات مخازن الفروع.
-- إرسال طلبية لفرع.
-- إستلام طلبية من فرع.
-- تقرير تحويلات الأصناف بين الفروع.
-- طلب شراء.
-- كشكول نواقص الفروع.
-- تقرير المخزون الزائد عن حاجة الفروع.
-- كشكول نواقص الرئيسي بارصدة مجمعة.
-- مبيعات أصناف الفروع.
-- تقرير حركة بيع الأصناف (للفروع).
-- تقرير قيمة المبيعات باليوم (للفروع).
-- تقرير بقيم أنواع المبيعات شهرى (للفروع).
-- تقرير تكلفة المبيعات ونسبة الربح (للفروع).
-- النقدية المتوفرة بالفروع.
-- إرسال نقدية لفرع.
-- خصم و إضافة على حساب الفرع.
-- كشف حساب فرع.
-
-#### 11. قائمة [البيانات العامة]
-- بيانات المؤسسة.
-- إعدادات التشغيل.
-- إعدادات طباعة فاتورة البيع.
-- إعدادات طباعة الباركود.
-- أخذ نسخة احتياطية.
-- نسخ احتياطية دورية.
-- حجم قاعدة البيانات.
-- طباعة باركود.
-- فتح الدرج.
-- إصدار فاتورة ورقية للتعاقد.
-- Update System.
-
-#### 12. قائمة [الأصناف]
-- قائمة الأصناف.
-- وحدات الأصناف.
-- الشركات المنتجة.
-- تقرير أصناف بالشركة المنتجة.
-- أماكن الأصناف.
-- تحديد أماكن الأصناف.
-- تقرير أصناف حسب مكان الصنف.
-- مجموعات الأصناف.
-- تحديد المجموعة العلمية للأصناف.
-- تقرير أصناف حسب المجموعة العلمية.
-- الشكل الصيدلى.
-- تحديد الشكل الصيدلى للأصناف.
-- تقرير أصناف حسب الشكل الصيدلى.
-- تقرير تاريخ إضافة الاصناف.
-- تقرير أصناف تغيرت أسعارها.
-- تقرير أصناف تغيرت معاملات وحداتها.
-- تعديل أسعار بيع الأصناف.
-
-#### 13. قائمة [إطار]
-- لترتيب النوافذ المفتوحة داخل البرنامج.
-
----
-### 💡 معلومات هامة من دليل التشغيل (PDF):
-- **تعريف الباركود:** لازم المقاس يكون 38x25 ملم من Printer Preferences.
-- **إيرور التاريخ:** لو الجهاز مطلع إيرور "مراجعة تاريخ الجهاز"، قدّم التاريخ يوم وافتح البرنامج وبعدين رجعه تانى وأنت فاتح البرنامج.
-- **الشبكة:** بورت الربط بين السيرفر والفرعي هو 1433 ولازم نتأكد من الـ Firewall.
-- **تحديث البرنامج:** بيتم عن طريق ملف PharmacySystemUpdate.exe الموجود في فولدر التسطيب.
-`;
-
-const INITIAL_KB: KBItem[] = [
-    {
-        id: '1',
-        question: 'أجيب منين فاتورة المبيعات؟',
-        answer: 'من قائمة [المبيعات] واختار "فاتورة المبيعات" أو اضغط على اختصار Alt+S.',
-        tags: ['sales', 'pos']
+// Helper: Cosine Similarity for Vector Search
+function cosineSimilarity(a: number[], b: number[]) {
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dotProduct += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
     }
-];
-
-const INITIAL_LANDING_CONFIG: LandingConfig = {
-    heroTitle: "نبتكر الحلول، \nلتبسيط أعمالك.",
-    heroSubtitle: "Modern Soft تقدم أقوى الأنظمة المحاسبية والإدارية. اكتشف نظام e-stock لإدارة الصيدليات بمفهوم جديد من الذكاء والسرعة.",
-    heroButtonText: "تحدث مع المساعد الذكي",
-    featuresTitle: "لماذا تختار e-stock؟",
-    featuresSubtitle: "منظومة متكاملة تغطي كافة احتياجاتك الإدارية",
-    features: [
-        { title: 'إدارة مخزون ذكية', desc: 'تنبيهات تلقائية للنواقص وتواريخ الصلاحية لضمان عدم الخسارة.', icon: '📦' },
-        { title: 'تقارير تفصيلية', desc: 'أكثر من 50 تقرير للمبيعات والأرباح وحركة الأصناف لاتخاذ قرارات دقيقة.', icon: '📊' },
-        { title: 'دعم فني فوري', desc: 'مساعد ذكي يعمل بالذكاء الاصطناعي متاح 24 ساعة لحل مشاكلك.', icon: '🤖' }
-    ],
-    aboutCompanyText: "نقدم حلولاً برمجية مبتكرة لمستقبل أعمالك. شريكك التقني للنجاح.",
-    contactEmail: "support@modernsoft.com",
-    contactPhone: "01272000075",
-    footerText: "© 2025 جميع الحقوق محفوظة لشركة Modern Soft.",
-    productsTitle: "حلول برمجية متكاملة",
-    productsSubtitle: "نقدم مجموعة من الأنظمة المصممة خصيصاً لتناسب حجم وطبيعة عملك.",
-    whatsappNumber: "201223438201",
-    products: [
-        { id: '1', name: 'e-stock Pharma', description: 'نظام إدارة الصيدليات المتكامل. يدعم الفاتورة الإلكترونية، إدارة المخزون، والربط بين الفروع.', image: 'https://placehold.co/400x300/e6f2ff/0066cc?text=e-stock+Pharma', price: '4000 ج.م' },
-        { id: '2', name: 'e-stock Retail', description: 'نظام الكاشير ونقاط البيع للانشطة التجارية. سهولة في الاستخدام ودقة في الحسابات.', image: 'https://placehold.co/400x300/fff0e6/cc6600?text=e-stock+Retail', price: '4500 ج.م' }
-    ],
-    aboutPageTitle: "من نحن",
-    aboutPageContent: "تأسست Modern Soft برؤية واضحة وهي تمكين الشركات والمؤسسات من خلال حلول برمجية ذكية ومبتكرة.",
-    aboutPageImage: "https://placehold.co/800x600/f3f4f6/9ca3af?text=Modern+Soft+Team",
-    contactPageTitle: "تواصل معنا",
-    contactAddress: "برج لؤلؤة الهندسة, بجوار كلية الهندسة_شبين الكوم_المنوفية",
-    contactMapUrl: "https://maps.google.com/maps?q=30.558778,31.015796&z=15&output=embed"
-};
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
 
 const KEYS = {
-    KB: 'masri_agent_kb',
-    LOGS: 'masri_agent_logs',
-    FEEDBACK: 'masri_agent_feedback',
-    ADMIN_PASS: 'masri_agent_admin_pass',
-    LICENSE: 'masri_agent_license',
-    DOCS: 'masri_agent_docs',
-    LANDING: 'masri_agent_landing_config',
-    SNIPPETS: 'masri_agent_snippets'
+    KB: 'mosaad_kb',
+    DOCS: 'mosaad_docs',
+    LOGS: 'mosaad_logs',
+    FEEDBACK: 'mosaad_feedback',
+    LANDING: 'mosaad_landing',
+    SNIPPETS: 'mosaad_snippets',
+    CUSTOMERS: 'mosaad_customers',
+    APP_SETTINGS: 'mosaad_app_settings',
+    ADMIN_PASS: 'mosaad_admin_pass',
+    LICENSE: 'mosaad_license',
+    FLOWS: 'mosaad_flows'
+};
+
+const INITIAL_KB: KBItem[] = [];
+
+const INITIAL_LANDING_CONFIG: LandingConfig = {
+    heroTitle: 'المساعد الذكي لشركة Modern Soft',
+    heroSubtitle: 'حلول برمجية ذكية لدعم عملائنا في كل وقت',
+    heroButtonText: 'ابدأ المحادثة الآن',
+    featuresTitle: 'مميزات النظام',
+    featuresSubtitle: 'نقدم لك أفضل تجربة دعم فني باستخدام الذكاء الاصطناعي',
+    features: [
+        { title: 'دعم 24/7', desc: 'البوت متاح للرد على استفساراتك في أي وقت بدون انتظار.', icon: '⚡' },
+        { title: 'أمان البيانات', desc: 'نضمن سرية وخصوصية بيانات عملائنا بأعلى معايير التشفير.', icon: '🔒' },
+        { title: 'تكامل تام', desc: 'ربط مباشر مع قواعد بيانات e-stock لضمان دقة المعلومة.', icon: '🔄' }
+    ],
+    aboutCompanyText: 'شركة Modern Soft هي الرائدة في حلول البرمجيات الطبية والتجارية في مصر.',
+    contactEmail: 'support@modernsoft.com',
+    contactPhone: '0123456789',
+    footerText: '© 2024 جميع الحقوق محفوظة لشركة Modern Soft',
+    productsTitle: 'أنظمتنا الذكية',
+    productsSubtitle: 'اختر النظام المناسب لمجال عملك',
+    whatsappNumber: '20123456789',
+    products: [
+      { id: 'pharma', name: 'e-Stock Pharmacy', description: 'النظام الأقوى لإدارة الصيدليات.', image: 'https://placehold.co/400x300?text=Pharmacy' },
+      { id: 'retail', name: 'e-Stock Retail', description: 'إدارة مخازن ومحلات البيع بالتجزئة.', image: 'https://placehold.co/400x300?text=Retail' },
+      { id: 'store', name: 'Pharma Store', description: 'نظام إدارة مخازن الأدوية والسلاسل.', image: 'https://placehold.co/400x300?text=Store' }
+    ],
+    aboutPageTitle: 'عن Modern Soft',
+    aboutPageContent: 'نحن نؤمن بأن التكنولوجيا هي المفتاح لتطوير الأعمال...',
+    aboutPageImage: 'https://placehold.co/800x400?text=About+Our+Company',
+    contactPageTitle: 'اتصل بنا',
+    contactAddress: 'القاهرة، مصر',
+    contactMapUrl: 'https://maps.google.com'
 };
 
 const SCREEN_IMAGES: Record<string, string> = {
@@ -296,12 +85,32 @@ const SCREEN_IMAGES: Record<string, string> = {
     inventory: 'https://placehold.co/600x400/png?text=Inventory'
 };
 
+const CORE_DOCS = `== الدليل المعتمد لنظام Modern Soft ==`;
+
 export const db = {
     getKB: async (): Promise<KBItem[]> => {
+        if (dbInstance) {
+            try {
+                const q = query(collection(dbInstance, "kb"));
+                const querySnapshot = await getFsDocs(q);
+                if (!querySnapshot.empty) {
+                    const items = querySnapshot.docs.map(d => d.data() as KBItem);
+                    localStorage.setItem(KEYS.KB, JSON.stringify(items)); // تحديث المحلي
+                    return items;
+                }
+            } catch (e) { console.error("Firestore getKB error", e); }
+        }
         const data = localStorage.getItem(KEYS.KB);
         return data ? JSON.parse(data) : INITIAL_KB;
     },
     saveKB: async (items: KBItem[]) => {
+        if (dbInstance) {
+            try {
+                for (const item of items) {
+                    await setDoc(doc(dbInstance, "kb", item.question.replace(/\//g, '_')), item);
+                }
+            } catch (e) { console.error("Firestore saveKB error", e); }
+        }
         localStorage.setItem(KEYS.KB, JSON.stringify(items));
     },
     searchKB: async (query: string): Promise<string | null> => {
@@ -313,90 +122,118 @@ export const db = {
     getCoreDocs: (): string => {
         return CORE_DOCS;
     },
-    getDocs: async (): Promise<string> => {
-        // Strategy: Check for Manual/Custom docs. If they exist, they are the source of truth.
-        // If NOT exist, fall back to CORE_DOCS (Default E-stock Manual).
-
+    getDocs: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<string> => {
+        const safeId = `manual_${systemType.replace(/\s+/g, '_')}`;
         if (dbInstance) {
             try {
-                const docRef = doc(dbInstance, "settings", "manual");
+                const docRef = doc(dbInstance, "settings", safeId);
                 const docSnap = await getDoc(docRef);
                 if (docSnap.exists()) {
-                    const content = docSnap.data().content;
-                    // If content is explicitly empty string, it means user deleted everything.
-                    // So we only return CORE_DOCS if document doesn't exist at all.
-                    if (content !== undefined) return content;
+                    const content = docSnap.data().content || "";
+                    localStorage.setItem(`${KEYS.DOCS}_${systemType}`, content); // تحديث المحلي
+                    return content;
                 }
-            } catch (e) { /* fallback to local */ }
+            } catch (e) { }
         }
-
-        // Check Local Storage
-        const localDocs = localStorage.getItem(KEYS.DOCS);
-        if (localDocs !== null) {
-            return localDocs;
-        }
-
-        // Default Fallback
-        return CORE_DOCS;
+        return localStorage.getItem(`${KEYS.DOCS}_${systemType}`) || "";
     },
-    saveDocs: async (text: string) => {
+    saveDocs: async (text: string, systemType: SystemType = 'e-Stock Pharmacy') => {
+        const safeId = `manual_${systemType.replace(/\s+/g, '_')}`;
+        if (dbInstance) {
+            try { await setDoc(doc(dbInstance, "settings", safeId), { content: text, timestamp: Date.now() }); } catch (e) { }
+        }
+        localStorage.setItem(`${KEYS.DOCS}_${systemType}`, text);
+    },
+    getMenus: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<string> => {
+        const safeId = `menus_${systemType.replace(/\s+/g, '_')}`;
         if (dbInstance) {
             try {
-                await setDoc(doc(dbInstance, "settings", "manual"), { content: text, timestamp: Date.now() });
-            } catch (e) {
-                console.error("Firestore saveDocs error", e);
-            }
+                const docRef = doc(dbInstance, "settings", safeId);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) return docSnap.data().content || "";
+            } catch (e) { }
         }
-        localStorage.setItem(KEYS.DOCS, text);
+        return localStorage.getItem(`${KEYS.DOCS}_menus_${systemType}`) || "";
     },
-    getManualOnly: async (): Promise<string> => {
-        // Alias for getDocs now, as we merged them into a single source of truth
-        return db.getDocs();
+    saveMenus: async (text: string, systemType: SystemType = 'e-Stock Pharmacy') => {
+        const safeId = `menus_${systemType.replace(/\s+/g, '_')}`;
+        if (dbInstance) {
+            try { await setDoc(doc(dbInstance, "settings", safeId), { content: text, timestamp: Date.now() }); } catch (e) { }
+        }
+        localStorage.setItem(`${KEYS.DOCS}_menus_${systemType}`, text);
     },
-    getDocLength: async (): Promise<number> => {
-        const docs = await db.getDocs();
-        return docs.length;
-    },
-    resetDocs: async (): Promise<number> => {
-        // Defines "Delete" as clearing the content completely
+    getDocChunks: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<DocChunk[]> => {
+        const safeId = `chunks_${systemType.replace(/\s+/g, '_')}`;
         if (dbInstance) {
             try {
-                await setDoc(doc(dbInstance, "settings", "manual"), { content: "" });
-            } catch (e) { console.error(e); }
+                const docRef = doc(dbInstance, "settings", safeId);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) return docSnap.data().chunks || [];
+            } catch (e) { }
         }
-        localStorage.setItem(KEYS.DOCS, "");
+        const data = localStorage.getItem(`${KEYS.DOCS}_chunks_${systemType}`);
+        return data ? JSON.parse(data) : [];
+    },
+    saveDocChunks: async (chunks: DocChunk[], systemType: SystemType = 'e-Stock Pharmacy') => {
+        const safeId = `chunks_${systemType.replace(/\s+/g, '_')}`;
+        if (dbInstance) {
+            try { await setDoc(doc(dbInstance, "settings", safeId), { chunks, timestamp: Date.now() }); } catch (e) { }
+        }
+        localStorage.setItem(`${KEYS.DOCS}_chunks_${systemType}`, JSON.stringify(chunks));
+    },
+    searchSimilarChunks: async (queryEmbedding: number[], systemType: SystemType = 'e-Stock Pharmacy', topK = 5): Promise<DocChunk[]> => {
+        const chunks = await db.getDocChunks(systemType);
+        if (chunks.length === 0) return [];
+        const scoredChunks = chunks.map(chunk => ({
+            chunk,
+            score: cosineSimilarity(queryEmbedding, chunk.embedding)
+        }));
+        scoredChunks.sort((a, b) => b.score - a.score);
+        return scoredChunks.slice(0, topK).map(sc => sc.chunk);
+    },
+    getDocLength: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<number> => {
+        const chunks = await db.getDocChunks(systemType);
+        return chunks.reduce((acc, chunk) => acc + chunk.text.length, 0);
+    },
+    resetDocs: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<number> => {
+        const safeId = `manual_${systemType.replace(/\s+/g, '_')}`;
+        const chunkSafeId = `chunks_${systemType.replace(/\s+/g, '_')}`;
+        if (dbInstance) {
+            try {
+                await setDoc(doc(dbInstance, "settings", safeId), { content: "" });
+                await setDoc(doc(dbInstance, "settings", chunkSafeId), { chunks: [] });
+            } catch (e) { }
+        }
+        localStorage.setItem(`${KEYS.DOCS}_${systemType}`, "");
+        localStorage.setItem(`${KEYS.DOCS}_chunks_${systemType}`, "[]");
         return 0;
     },
-    restoreDefaults: async (): Promise<number> => {
-        // New function to restore original manual
-        if (dbInstance) {
-            try {
-                await deleteDoc(doc(dbInstance, "settings", "manual"));
-            } catch (e) { console.error(e); }
-        }
-        localStorage.removeItem(KEYS.DOCS);
+    restoreDefaults: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<number> => {
+        await db.saveDocs(CORE_DOCS, systemType);
         return CORE_DOCS.length;
     },
-    getSnippets: async (): Promise<KnowledgeSnippet[]> => {
+    getSnippets: async (systemType?: SystemType): Promise<KnowledgeSnippet[]> => {
+        let snippets: KnowledgeSnippet[] = [];
         if (dbInstance) {
             try {
                 const q = query(collection(dbInstance, "snippets"), orderBy("timestamp", "desc"));
                 const querySnapshot = await getFsDocs(q);
-                return querySnapshot.docs.map(d => d.data() as KnowledgeSnippet);
-            } catch (e) {
-                console.error("Firestore getSnippets error", e);
+                snippets = querySnapshot.docs.map(d => d.data() as KnowledgeSnippet);
+                localStorage.setItem(KEYS.SNIPPETS, JSON.stringify(snippets)); // تحديث المحلي
+            } catch (e) { 
+                const data = localStorage.getItem(KEYS.SNIPPETS);
+                snippets = data ? JSON.parse(data) : [];
             }
+        } else {
+            const data = localStorage.getItem(KEYS.SNIPPETS);
+            snippets = data ? JSON.parse(data) : [];
         }
-        const data = localStorage.getItem(KEYS.SNIPPETS);
-        return data ? JSON.parse(data) : [];
+        if (systemType) snippets = snippets.filter(s => s.systemType === systemType || s.systemType === 'All');
+        return snippets;
     },
     addSnippet: async (snippet: KnowledgeSnippet) => {
         if (dbInstance) {
-            try {
-                await setDoc(doc(dbInstance, "snippets", snippet.id), snippet);
-            } catch (e) {
-                console.error("Firestore addSnippet error", e);
-            }
+            try { await setDoc(doc(dbInstance, "snippets", snippet.id), snippet); } catch (e) { }
         }
         const data = localStorage.getItem(KEYS.SNIPPETS);
         const localSnippets = data ? JSON.parse(data) : [];
@@ -405,16 +242,44 @@ export const db = {
     },
     deleteSnippet: async (id: string) => {
         if (dbInstance) {
-            try {
-                await deleteDoc(doc(dbInstance, "snippets", id));
-            } catch (e) { console.error(e); }
+            try { await deleteDoc(doc(dbInstance, "snippets", id)); } catch (e) { }
         }
         const data = localStorage.getItem(KEYS.SNIPPETS);
         if (data) {
-            const snippets = JSON.parse(data) as KnowledgeSnippet[];
-            const filtered = snippets.filter(s => s.id !== id);
-            localStorage.setItem(KEYS.SNIPPETS, JSON.stringify(filtered));
+            const snips = JSON.parse(data) as KnowledgeSnippet[];
+            localStorage.setItem(KEYS.SNIPPETS, JSON.stringify(snips.filter(s => s.id !== id)));
         }
+    },
+    getTroubleshootFlows: async (systemType?: SystemType): Promise<TroubleshootFlow[]> => {
+        let flows: TroubleshootFlow[] = [];
+        if (dbInstance) {
+            try {
+                const q = query(collection(dbInstance, "flows"));
+                const querySnapshot = await getFsDocs(q);
+                flows = querySnapshot.docs.map(d => d.data() as TroubleshootFlow);
+            } catch (e) { }
+        } else {
+            const data = localStorage.getItem(KEYS.FLOWS);
+            flows = data ? JSON.parse(data) : [];
+        }
+        if (systemType) return flows.filter(f => f.systemType === systemType || f.systemType === 'All');
+        return flows;
+    },
+    saveTroubleshootFlow: async (flow: TroubleshootFlow) => {
+        if (dbInstance) {
+            try { await setDoc(doc(dbInstance, "flows", flow.id), flow); } catch (e) { }
+        }
+        const current = await db.getTroubleshootFlows();
+        const idx = current.findIndex(f => f.id === flow.id);
+        if (idx >= 0) current[idx] = flow; else current.push(flow);
+        localStorage.setItem(KEYS.FLOWS, JSON.stringify(current));
+    },
+    deleteTroubleshootFlow: async (id: string) => {
+        if (dbInstance) {
+            try { await deleteDoc(doc(dbInstance, "flows", id)); } catch (e) { }
+        }
+        const current = await db.getTroubleshootFlows();
+        localStorage.setItem(KEYS.FLOWS, JSON.stringify(current.filter(f => f.id !== id)));
     },
     getLogs: async (): Promise<ChatLog[]> => {
         if (dbInstance) {
@@ -422,25 +287,19 @@ export const db = {
                 const q = query(collection(dbInstance, "logs"), orderBy("timestamp", "desc"), limit(100));
                 const querySnapshot = await getFsDocs(q);
                 return querySnapshot.docs.map(d => d.data() as ChatLog);
-            } catch (e) {
-                console.error("Firestore getLogs error, falling back to local", e);
-            }
+            } catch (e) { }
         }
         const data = localStorage.getItem(KEYS.LOGS);
         return data ? JSON.parse(data) : [];
     },
     addLog: async (log: ChatLog) => {
         if (dbInstance) {
-            try {
-                await setDoc(doc(dbInstance, "logs", log.id), log);
-            } catch (e) {
-                console.error("Firestore addLog error", e);
-            }
+            try { await setDoc(doc(dbInstance, "logs", log.id), log); } catch (e) { }
         }
-        const localData = localStorage.getItem(KEYS.LOGS);
-        const localLogs = localData ? JSON.parse(localData) : [];
-        localLogs.unshift(log);
-        localStorage.setItem(KEYS.LOGS, JSON.stringify(localLogs));
+        const data = localStorage.getItem(KEYS.LOGS);
+        const logs = data ? JSON.parse(data) : [];
+        logs.unshift(log);
+        localStorage.setItem(KEYS.LOGS, JSON.stringify(logs));
     },
     getFeedback: async (): Promise<Feedback[]> => {
         if (dbInstance) {
@@ -448,92 +307,182 @@ export const db = {
                 const q = query(collection(dbInstance, "feedback"), orderBy("timestamp", "desc"), limit(100));
                 const querySnapshot = await getFsDocs(q);
                 return querySnapshot.docs.map(d => d.data() as Feedback);
-            } catch (e) {
-                console.error("Firestore getFeedback error", e);
-            }
+            } catch (e) { }
         }
         const data = localStorage.getItem(KEYS.FEEDBACK);
         return data ? JSON.parse(data) : [];
     },
     addFeedback: async (feedback: Feedback) => {
         if (dbInstance) {
-            try {
-                await addDoc(collection(dbInstance, "feedback"), feedback);
-            } catch (e) {
-                console.error("Firestore addFeedback error", e);
-            }
+            try { await addDoc(collection(dbInstance, "feedback"), feedback); } catch (e) { }
         }
         const data = localStorage.getItem(KEYS.FEEDBACK);
         const items = data ? JSON.parse(data) : [];
         items.unshift(feedback);
         localStorage.setItem(KEYS.FEEDBACK, JSON.stringify(items));
     },
-    getAdminPassword: async (): Promise<string> => {
+    getCustomers: async (): Promise<Customer[]> => {
         if (dbInstance) {
             try {
-                const docRef = doc(dbInstance, "settings", "admin");
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    return docSnap.data().password || 'admin123';
+                const q = query(collection(dbInstance, "customers"), orderBy("name"));
+                const querySnapshot = await getFsDocs(q);
+                const cloudCustomers = querySnapshot.docs.map(d => d.data() as Customer);
+                localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(cloudCustomers)); // تحديث المحلي ببيانات السحابة
+                return cloudCustomers;
+            } catch (e: any) { 
+                console.error("Firestore getCustomers error:", e);
+                if (e.code === 'permission-denied') {
+                    console.warn("Firebase rules are blocking read access.");
                 }
-            } catch (e) { /* ignore */ }
+            }
         }
-        return localStorage.getItem(KEYS.ADMIN_PASS) || 'admin123';
+        const data = localStorage.getItem(KEYS.CUSTOMERS);
+        return data ? JSON.parse(data) : [];
+    },
+    saveCustomer: async (customer: Customer) => {
+        if (customer.contractNumber === '4998' || customer.contractNumber === '213204') customer.isActive = true;
+        if (dbInstance) {
+            try { 
+                await setDoc(doc(dbInstance, "customers", customer.id), customer); 
+            } catch (e: any) { 
+                console.error("Cloud Save Fail:", e); 
+                if (e.code === 'permission-denied') {
+                    alert("فشل الحفظ في السحابة: صلاحيات Firebase Rules تمنع الإضافة.");
+                }
+            }
+        }
+        const data = localStorage.getItem(KEYS.CUSTOMERS);
+        const custs = data ? JSON.parse(data) as Customer[] : [];
+        const idx = custs.findIndex(c => c.id === customer.id);
+        if (idx >= 0) custs[idx] = customer; else custs.push(customer);
+        localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(custs));
+    },
+    authenticateCustomer: async (name: string, contractNumber: string): Promise<Customer | null> => {
+        if (name.trim().toLowerCase() === 'hatem' && contractNumber.trim() === '4998') {
+             return { id: 'protected_4998', name: 'hatem', contractNumber: '4998', isActive: true, createdAt: Date.now(), systemType: 'e-Stock Pharmacy' };
+        }
+        if (name.trim().toLowerCase() === 'amir' && contractNumber.trim() === '213204') {
+             return { id: 'protected_213204', name: 'amir', contractNumber: '213204', isActive: true, createdAt: Date.now(), systemType: 'e-Stock Pharmacy' };
+        }
+        const customers = await db.getCustomers();
+        const found = customers.find(c => c.name.trim() === name.trim() && c.contractNumber.trim() === contractNumber.trim());
+        return (found && found.isActive) ? found : null;
+    },
+    bulkAddCustomers: async (newCustomers: Customer[]) => {
+        const current = await db.getCustomers();
+        const uniqueNew = newCustomers.filter(nc => !current.some(c => c.contractNumber === nc.contractNumber));
+        for (const c of uniqueNew) {
+            await db.saveCustomer(c);
+        }
+        return uniqueNew.length;
+    },
+    deleteCustomer: async (id: string) => {
+        if (dbInstance) {
+            try { await deleteDoc(doc(dbInstance, "customers", id)); } catch (e) { }
+        }
+        const data = localStorage.getItem(KEYS.CUSTOMERS);
+        if (data) {
+            const custs = JSON.parse(data) as Customer[];
+            localStorage.setItem(KEYS.CUSTOMERS, JSON.stringify(custs.filter(c => c.id !== id)));
+        }
+    },
+    getAppSettings: async (): Promise<AppSettings> => {
+        if (dbInstance) {
+            try {
+                const docSnap = await getDoc(doc(dbInstance, "settings", "app_config"));
+                if (docSnap.exists()) return docSnap.data() as AppSettings;
+            } catch (e) { }
+        }
+        const data = localStorage.getItem(KEYS.APP_SETTINGS);
+        return data ? JSON.parse(data) : { sessionTimeoutMinutes: 15 };
+    },
+    saveAppSettings: async (settings: AppSettings) => {
+        if (dbInstance) {
+            try { await setDoc(doc(dbInstance, "settings", "app_config"), settings); } catch (e) { }
+        }
+        localStorage.setItem(KEYS.APP_SETTINGS, JSON.stringify(settings));
+    },
+    getGlobalCategories: async (systemType: SystemType): Promise<string[]> => {
+        const safeId = `cats_${systemType.replace(/\s+/g, '_')}`;
+        if (dbInstance) {
+            try {
+                const docSnap = await getDoc(doc(dbInstance, "settings", safeId));
+                if (docSnap.exists()) return docSnap.data().categories || ['عام'];
+            } catch (e) { }
+        }
+        const data = localStorage.getItem(`cats_${systemType}`);
+        return data ? JSON.parse(data) : ['عام'];
+    },
+    saveGlobalCategories: async (categories: string[], systemType: SystemType) => {
+        const safeId = `cats_${systemType.replace(/\s+/g, '_')}`;
+        if (dbInstance) {
+            try { await setDoc(doc(dbInstance, "settings", safeId), { categories, timestamp: Date.now() }); } catch (e) { }
+        }
+        localStorage.setItem(`cats_${systemType}`, JSON.stringify(categories));
+    },
+    getAdminPassword: async () => {
+        if (dbInstance) {
+            try {
+                const docSnap = await getDoc(doc(dbInstance, "settings", "admin_creds"));
+                if (docSnap.exists() && docSnap.data().password) return docSnap.data().password;
+            } catch (e) { }
+        }
+        const local = localStorage.getItem(KEYS.ADMIN_PASS);
+        return local || 'support';
     },
     saveAdminPassword: async (pass: string) => {
         if (dbInstance) {
-            try {
-                await setDoc(doc(dbInstance, "settings", "admin"), { password: pass });
-            } catch (e) { /* ignore */ }
+            try { await setDoc(doc(dbInstance, "settings", "admin_creds"), { password: pass }); } catch (e) { }
         }
         localStorage.setItem(KEYS.ADMIN_PASS, pass);
     },
-    getLicense: (): string | null => {
-        return localStorage.getItem(KEYS.LICENSE);
-    },
-    activateLicense: (key: string): boolean => {
-        if (key.trim().toUpperCase().startsWith('ESTOCK-')) {
-            localStorage.setItem(KEYS.LICENSE, key.trim());
-            return true;
-        }
-        return false;
-    },
-    getScreenImage: (screenName: string): string | null => {
-        return SCREEN_IMAGES[screenName?.toLowerCase()] || null;
-    },
     getLandingConfig: async (): Promise<LandingConfig> => {
-        let finalConfig = { ...INITIAL_LANDING_CONFIG };
         if (dbInstance) {
             try {
-                const docRef = doc(dbInstance, "settings", "landing");
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) {
-                    const remoteData = docSnap.data() as Partial<LandingConfig>;
-                    finalConfig = { ...finalConfig, ...remoteData };
-                }
-            } catch (e) {
-                console.error("Firestore getLandingConfig error", e);
-            }
-        } else {
-            const data = localStorage.getItem(KEYS.LANDING);
-            if (data) {
-                try {
-                    const parsed = JSON.parse(data);
-                    finalConfig = { ...finalConfig, ...parsed };
-                } catch (e) { /* ignore */ }
-            }
+                const docSnap = await getDoc(doc(dbInstance, "settings", "landing"));
+                if (docSnap.exists()) return { ...INITIAL_LANDING_CONFIG, ...docSnap.data() };
+            } catch (e) { }
         }
-        return finalConfig;
+        const local = localStorage.getItem(KEYS.LANDING);
+        return local ? JSON.parse(local) : INITIAL_LANDING_CONFIG;
     },
     saveLandingConfig: async (config: LandingConfig) => {
         if (dbInstance) {
-            try {
-                await setDoc(doc(dbInstance, "settings", "landing"), config);
-            } catch (e: any) {
-                console.error("Firestore saveLandingConfig error", e);
-                throw e;
-            }
+            try { await setDoc(doc(dbInstance, "settings", "landing"), config); } catch (e) { }
         }
         localStorage.setItem(KEYS.LANDING, JSON.stringify(config));
+    },
+    getScreenImage: (name: string) => SCREEN_IMAGES[name?.toLowerCase()] || null,
+    getLicense: () => localStorage.getItem(KEYS.LICENSE),
+    activateLicense: (key: string) => {
+        if (key.startsWith('ESTOCK-')) { localStorage.setItem(KEYS.LICENSE, key); return true; }
+        return false;
+    },
+    clearAllTrainingData: async () => {
+        const systems: SystemType[] = ['e-Stock Pharmacy', 'e-Stock Retail', 'Pharma Store'];
+        for (const sys of systems) {
+            await db.resetDocs(sys);
+            await db.saveMenus("", sys);
+        }
+        if (dbInstance) {
+            try {
+                const q = query(collection(dbInstance, "snippets"));
+                const querySnapshot = await getFsDocs(q);
+                for (const d of querySnapshot.docs) await deleteDoc(doc(dbInstance, "snippets", d.id));
+            } catch (e) { }
+        }
+        localStorage.setItem(KEYS.SNIPPETS, "[]");
+        localStorage.setItem(KEYS.KB, "[]");
+    },
+    testCloudConnection: async (): Promise<{ success: boolean; error?: string }> => {
+        if (!dbInstance) return { success: false, error: "Firebase index not initialized" };
+        try {
+            const testRef = doc(dbInstance, "settings", "connection_test");
+            await setDoc(testRef, { lastTest: Date.now() }, { merge: true });
+            return { success: true };
+        } catch (e: any) {
+            console.error("Cloud Connection Test Failed:", e);
+            return { success: false, error: e.code || e.message };
+        }
     }
 };

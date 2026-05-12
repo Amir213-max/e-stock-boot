@@ -36,6 +36,7 @@ export default async function handler(
       config: {
         systemInstruction: systemInstruction || '',
         tools: tools || [],
+        temperature: 0.1, // قفلنا التأليف
       },
     });
 
@@ -52,7 +53,7 @@ export default async function handler(
     console.error('Gemini API Error:', error);
     return res.status(500).json({ 
       error: error.message || 'Internal server error',
-      text: 'معلش في مشكلة بسيطة في الاتصال، ممكن تحاول تاني؟'
+      text: 'عذراً، أواجه ضغطاً كبيراً في الطلبات حالياً ⏳\nيرجى الانتظار دقيقة والمحاولة مرة أخرى.'
     });
   }
 }

@@ -9,10 +9,12 @@ export interface KBItem {
 export interface ChatLog {
   id: string;
   timestamp: number;
-  userQuery: string; // Full transcript or main query
-  botResponse: string; // Summary
-  clientName?: string; // Extracted client name
+  userQuery: string;
+  botResponse: string;
+  clientName?: string;
   duration: number;
+  isUnanswered?: boolean;
+  systemType?: SystemType;
 }
 
 export interface Feedback {
@@ -21,6 +23,7 @@ export interface Feedback {
   chatId: string;
   rating: number; // 1-5
   comment?: string;
+  systemType?: SystemType;
 }
 
 export interface ToolCallArgs {
@@ -31,7 +34,9 @@ export enum AppMode {
   LANDING = 'LANDING',
   LOGIN = 'LOGIN',
   CLIENT = 'CLIENT',
-  ADMIN = 'ADMIN'
+  GUEST = 'GUEST',
+  ADMIN = 'ADMIN',
+  LANDING_ADMIN = 'LANDING_ADMIN'
 }
 
 export interface LandingFeature {
@@ -48,43 +53,87 @@ export interface Product {
   price?: string;
 }
 
+export interface Testimonial {
+  name: string;
+  role: string;
+  text: string;
+  rating: number;
+}
+
+export interface FAQ {
+  question: string;
+  answer: string;
+}
+
+export interface Stat {
+  label: string;
+  value: string;
+  icon: string;
+}
+
+export interface Plan {
+  name: string;
+  desc: string;
+  features: string[];
+  highlight: boolean;
+}
+
 export interface LandingConfig {
   // Home Page
   heroTitle: string;
   heroSubtitle: string;
   heroButtonText: string;
+  
+  // Stats
+  stats: Stat[];
+
+  // Features
   featuresTitle: string;
   featuresSubtitle: string;
   features: LandingFeature[];
 
-  // Footer / General Contact
+  // About Company (Footer/Home)
   aboutCompanyText: string;
   contactEmail: string;
   contactPhone: string;
+  contactAddress: string;
   footerText: string;
 
-  // Products Page
+  // Products
   productsTitle: string;
   productsSubtitle: string;
-  whatsappNumber: string; // WhatsApp Number for Demo Requests
+  whatsappNumber: string;
   products: Product[];
 
-  // About Page
-  aboutPageTitle: string;
-  aboutPageContent: string;
-  aboutPageImage: string;
+  // Pricing
+  plansTitle: string;
+  plansSubtitle: string;
+  plans: Plan[];
 
-  // Contact Page
-  contactPageTitle: string;
-  contactAddress: string;
-  contactMapUrl: string;
+  // Social Links
+  facebookUrl: string;
+  linkedinUrl: string;
+  instagramUrl: string;
+  whatsappPhone: string;
+
+  // Testimonials
+  testimonials: Testimonial[];
+
+  // FAQs
+  faqs: FAQ[];
 }
+
+export type SystemType = 'e-Stock Pharmacy' | 'e-Stock Retail' | 'Pharma Store';
 
 export interface KnowledgeSnippet {
   id: string;
   content: string;
-  imageUrl?: string; // Base64
+  imageUrl?: string;
   timestamp: number;
+  systemType: SystemType | 'All';
+  category?: string;
+  menuName?: string;
+  screenName?: string;
 }
 
 export interface Customer {
@@ -94,8 +143,35 @@ export interface Customer {
   isActive: boolean;
   createdAt: number;
   lastLogin?: number;
+  systemType: SystemType;
 }
 
 export interface AppSettings {
   sessionTimeoutMinutes: number;
+}
+
+export interface DocChunk {
+  id: string;
+  systemType: SystemType;
+  text: string;
+  embedding: number[];
+}
+
+export interface DecisionNode {
+  id: string;
+  text: string; // The question the bot asks
+  options: {
+    label: string; // The button text for the user
+    nextId?: string; // ID of the next node
+    finalAnswer?: string; // If it's a leaf, this is the final solution
+  }[];
+}
+
+export interface TroubleshootFlow {
+  id: string;
+  systemType: SystemType | 'All';
+  triggerKeyword: string; // Word like "طابعة", "انترنت"
+  title: string;
+  nodes: DecisionNode[];
+  startNodeId: string;
 }
