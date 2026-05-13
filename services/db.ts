@@ -137,11 +137,27 @@ export const db = {
         }
         localStorage.setItem(KEYS.KB, JSON.stringify(items));
     },
-    searchKB: async (query: string): Promise<string | null> => {
+    searchKB: async (queryStr: string): Promise<string | null> => {
+        const q = queryStr.toLowerCase();
+        
+        // 1. Search in KB (Structured Q&A)
         const items = await db.getKB();
-        const q = query.toLowerCase();
-        const match = items.find(item => item.question.includes(q));
-        return match ? match.answer : null;
+        const kbMatch = items.find(item => item.question.toLowerCase().includes(q));
+        if (kbMatch) return kbMatch.answer;
+
+        // 2. Search in Snippets (Admin added notes)
+        const snippets = await db.getSnippets();
+        const snippetMatch = snippets.find(s => 
+            (s.content && s.content.toLowerCase().includes(q)) || 
+            (s.menuName && s.menuName.toLowerCase().includes(q)) ||
+            (s.screenName && s.screenName.toLowerCase().includes(q))
+        );
+        
+        if (snippetMatch) {
+            return `[From Knowledge Snippet: ${snippetMatch.menuName || snippetMatch.screenName || 'General Info'}]\n${snippetMatch.content}`;
+        }
+
+        return null;
     },
     getCoreDocs: (): string => {
         return CORE_DOCS;
@@ -386,9 +402,32 @@ export const db = {
         if (name.trim().toLowerCase() === 'amir' && contractNumber.trim() === '213204') {
              return { id: 'protected_213204', name: 'amir', contractNumber: '213204', isActive: true, createdAt: Date.now(), systemType: 'e-Stock Pharmacy' };
         }
-        const customers = await db.getCustomers();
-        const found = customers.find(c => c.name.trim() === name.trim() && c.contractNumber.trim() === contractNumber.trim());
-        return (found && found.isActive) ? found : null;
+        
+        if (dbInstance) {
+            try {
+                const q = query(
+                    collection(dbInstance, "customers"), 
+                    where("name", "==", name.trim()), 
+                    where("contractNumber", "==", contractNumber.trim())
+                );
+                const querySnapshot = await getFsDocs(q);
+                if (!querySnapshot.empty) {
+                    const found = querySnapshot.docs[0].data() as Customer;
+                    return found.isActive ? found : null;
+                }
+            } catch (e) {
+                console.error("Direct query failed, falling back to local cache", e);
+            }
+        }
+
+        // Fallback local search
+        const data = localStorage.getItem(KEYS.CUSTOMERS);
+        if (data) {
+            const customers = JSON.parse(data) as Customer[];
+            const found = customers.find(c => c.name.trim() === name.trim() && c.contractNumber.trim() === contractNumber.trim());
+            return (found && found.isActive) ? found : null;
+        }
+        return null;
     },
     bulkAddCustomers: async (newCustomers: Customer[]) => {
         const current = await db.getCustomers();

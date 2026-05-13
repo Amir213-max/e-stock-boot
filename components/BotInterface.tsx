@@ -4,6 +4,8 @@ import { db } from '../services/db';
 import { ChatLog, Customer } from '../types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { auth } from '../services/firebase';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 
 // Markdown custom styles renderer
 const MarkdownRenderer = ({ content }: { content: string }) => {
@@ -265,13 +267,18 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
 
                 let snippetsInstruction = '';
                 if (snippets.length > 0) {
-                    // IMPORTANT: We tell the model these snippets are CRITICAL UPDATES
-                    snippetsInstruction = `\n\n=== 🚨 CRITICAL UPDATES & NEW KNOWLEDGE (HIGHEST PRIORITY) ===\nThe following information was manually added by the admin to train you. \n**RULE: If any information here conflicts with other manuals, YOU MUST USE THE INFO BELOW as the correct truth.**\n`;
-                    snippets.forEach(s => {
-                        const content = s.content.length > 2000 ? s.content.substring(0, 2000) + '...' : s.content;
-                        const navInfo = (s.menuName || s.screenName) ? `[Navigation Protocol: ${s.menuName ? 'القائمة الرئيسية: ' + s.menuName : ''} ${s.screenName ? ' -> الشاشة: ' + s.screenName : ''}]` : '';
-                        snippetsInstruction += `-[ID: ${s.id}] ${navInfo}\nContent: ${content} ${s.imageUrl ? '(Has Image available)' : ''}\n`;
+                    // Optimized: Only inject top 5 snippets into initial context to save tokens.
+                    // The rest are accessible via the search_knowledge_base tool.
+                    const essentialSnippets = snippets.slice(0, 5);
+                    snippetsInstruction = `\n\n=== 🚨 RECENT UPDATES & QUICK CONTEXT ===\n`;
+                    essentialSnippets.forEach(s => {
+                        const content = s.content.length > 600 ? s.content.substring(0, 600) + '...' : s.content;
+                        snippetsInstruction += `- ${s.menuName || s.screenName || 'Update'}: ${content} ${s.imageUrl ? '(Image available)' : ''}\n`;
                     });
+
+                    if (snippets.length > 5) {
+                        snippetsInstruction += `\n*Note: There are ${snippets.length - 5} more detailed records in the knowledge base. If the query is specific and not covered here, use 'search_knowledge_base' to find more.*`;
+                    }
                 }
 
                 // Inject Company Info from Admin Settings
@@ -303,20 +310,17 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     - **System Focus**: You ONLY support ${sysType}. If a screen or feature does not exist in the provided ${sysType} documentation below, tell the user gracefully that it does not exist in this system, without mentioning other systems.
                     
                     **KNOWLEDGE BASE USAGE:**
-                    - Your knowledge base now contains **Structured Q&A** sections.
-                    - **Navigation Paths**: If a snippet contains "القائمة الرئيسية" or "الشاشة", prioritize mentioning these paths clearly to the user (e.g., "اتفضل يا فندم، هتدخل على قائمة [اسم القائمة] وتختار شاشة [اسم الشاشة]").
-                    - **Strategy**: First, scan the docs for a "Q: [User Question]" that matches the user's intent. If found, use the provided "A: [Answer]" as your core response.
-                    - **Style**: Convert the stiff documentation into a warm, helpful conversation.
+                    - **Search Strategy**: You have access to a large knowledge base. If the answer isn't in the provided "RECENT UPDATES" above, use the 'search_knowledge_base' tool immediately.
+                    - **Navigation Paths**: If a snippet contains "القائمة الرئيسية" or "الشاشة", prioritize mentioning these paths clearly.
                     - **Steps**: When giving instructions, ALWAYS use numbered lists (1. 2. 3.) for clarity.
-                    - **Conflict Resolution**: If the "Critical Updates" section contradicts the main manual, the Critical Updates ALWAYS win.
                     
                     **TROUBLESHOOTING & PROCEDURES:**
-                    - If a user reports a **Printer Issue**, guide them through driver installation (Seagull) and page setup (38x25mm).
-                    - If a user asks about **Networking**, explain the 4 methods (Local name, Static IP, Radmin VPN) + Firewall (Port 1433).
+                    - Printer Issues: Seagull driver + 38x25mm setup.
+                    - Networking: Local name, Static IP, Radmin VPN, Firewall (Port 1433).
                     
                     **INTERACTION RULES:** 
-                    - **Greeting**:  If the customer name is known (${clientName}), welcome them warmly.
-                    - **Unknowns**: If the info is completely missing from your docs, say: "للاسف المعلومة دي مش موجودة عندي حالياً بخصوص برنامج ${sysType}، ممكن تتواصل مع الدعم الفني عشان يفيدوك أكتر." provide the phone number.
+                    - **Greeting**: Warmly welcome ${clientName}.
+                    - **Unknowns**: If info is completely missing even after searching, say: "للاسف المعلومة دي مش موجودة عندي حالياً بخصوص برنامج ${sysType}، ممكن تتواصل مع الدعم الفني عشان يفيدوك أكتر." provide the phone number.
 
                     ${docsInstruction}`;
 
@@ -412,17 +416,18 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
 
     const handleAdminSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        const storedPass = await db.getAdminPassword();
-        if (adminPassword === storedPass) {
-            // حفظ في sessionStorage إنه دخل كلمة المرور بنجاح
+        try {
+            // Secure login via Firebase Auth
+            await signInWithEmailAndPassword(auth, 'admin@modernsoft.com', adminPassword);
             sessionStorage.setItem('admin_password_entered', 'true');
             
             setShowAdminLogin(false);
             setAdminPassword('');
             setAdminError('');
             onAdminClick();
-        } else {
-            setAdminError('كلمة المرور غير صحيحة');
+        } catch (error: any) {
+            console.error("Auth error:", error);
+            setAdminError('كلمة المرور غير صحيحة أو الحساب غير مفعل');
         }
     };
 
