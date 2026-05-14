@@ -1,6 +1,5 @@
 
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
 
 // إعدادات Firebase الخاصة بمشروع E-stock Chat
 const firebaseConfig = {
@@ -15,4 +14,3 @@ const firebaseConfig = {
 
 // تهيئة التطبيق والاتصال بـ Firebase
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
