@@ -190,20 +190,50 @@ export const db = {
         const safeId = `chunks_${systemType.replace(/\s+/g, '_')}`;
         if (dbInstance) {
             try {
-                const docRef = doc(dbInstance, "settings", safeId);
-                const docSnap = await getDoc(docRef);
-                if (docSnap.exists()) return docSnap.data().chunks || [];
-            } catch (e) { }
+                // Read part 0 (main), then check for extra parts
+                const allChunks: DocChunk[] = [];
+                let partIndex = 0;
+                while (true) {
+                    const partId = partIndex === 0 ? safeId : `${safeId}_p${partIndex}`;
+                    const docRef = doc(dbInstance, "settings", partId);
+                    const docSnap = await getDoc(docRef);
+                    if (!docSnap.exists()) break;
+                    const partChunks = docSnap.data().chunks || [];
+                    allChunks.push(...partChunks);
+                    if (!docSnap.data().hasMore) break;
+                    partIndex++;
+                }
+                if (allChunks.length > 0) {
+                    localStorage.setItem(`${KEYS.DOCS}_chunks_${systemType}`, JSON.stringify(allChunks));
+                    return allChunks;
+                }
+            } catch (e) { console.error('getDocChunks Firestore error', e); }
         }
         const data = localStorage.getItem(`${KEYS.DOCS}_chunks_${systemType}`);
         return data ? JSON.parse(data) : [];
     },
     saveDocChunks: async (chunks: DocChunk[], systemType: SystemType = 'e-Stock Pharmacy') => {
         const safeId = `chunks_${systemType.replace(/\s+/g, '_')}`;
-        if (dbInstance) {
-            try { await setDoc(doc(dbInstance, "settings", safeId), { chunks, timestamp: Date.now() }); } catch (e) { }
-        }
+        // Always save to localStorage first (reliable)
         localStorage.setItem(`${KEYS.DOCS}_chunks_${systemType}`, JSON.stringify(chunks));
+        if (dbInstance) {
+            try {
+                // Split into batches of 100 chunks to stay under Firestore 1MB limit
+                const BATCH_SIZE = 100;
+                const parts = [];
+                for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+                    parts.push(chunks.slice(i, i + BATCH_SIZE));
+                }
+                for (let i = 0; i < parts.length; i++) {
+                    const partId = i === 0 ? safeId : `${safeId}_p${i}`;
+                    await setDoc(doc(dbInstance, "settings", partId), {
+                        chunks: parts[i],
+                        timestamp: Date.now(),
+                        hasMore: i < parts.length - 1
+                    });
+                }
+            } catch (e) { console.error('saveDocChunks Firestore error - saved to localStorage only', e); }
+        }
     },
     searchSimilarChunks: async (queryEmbedding: number[], systemType: SystemType = 'e-Stock Pharmacy', topK = 5): Promise<DocChunk[]> => {
         const chunks = await db.getDocChunks(systemType);
@@ -216,6 +246,12 @@ export const db = {
         return scoredChunks.slice(0, topK).map(sc => sc.chunk);
     },
     getDocLength: async (systemType: SystemType = 'e-Stock Pharmacy'): Promise<number> => {
+        // Read from chunks (RAG vector storage - the primary storage now)
+        const chunks = await db.getDocChunks(systemType);
+        if (chunks.length > 0) {
+            return chunks.reduce((acc, c) => acc + (c.text ? c.text.length : 0), 0);
+        }
+        // Fallback: legacy text docs
         const docs = await db.getDocs(systemType);
         return docs.length;
     },
