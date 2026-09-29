@@ -1,5 +1,17 @@
 {
   "version": 2,
+  "redirects": [
+    {
+      "source": "/assets/index.html",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/index.html",
+      "destination": "/",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",

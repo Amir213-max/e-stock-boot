@@ -4,17 +4,25 @@ import {
   ArrowLeft, Pill, Store, Building2, 
   Users, Zap, Headset, Award, CheckCircle2, ChevronRight, ChevronLeft,
   Menu, X, Shield, Layout, Database, Clock, Cloud, Smartphone,
-  Plus, Minus, XCircle, CheckCircle, Quote, Star, ArrowUpRight, HeartHandshake, Wallet, Bot,
+  Plus, Minus, XCircle, CheckCircle, Quote, Star, ArrowUpRight, HeartHandshake, Wallet, Bot, Sparkles, BrainCircuit,
   Play, Monitor, Cpu
 } from 'lucide-react';
 import LogoSVG from './LogoSVG';
 import BotFloatingButton from './BotFloatingButton';
 import ProductDetailPage from './ProductDetailPage';
-import { db } from '../services/db';
+import { db, firestoreDb } from '../services/db';
 import { LandingConfig } from '../types';
 import { defaultProducts } from '../data/defaultProducts';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 // --- DATA ---
+const defaultStats = [
+  { label: 'عميل يثق بنا', value: '+500', icon: 'Users' },
+  { label: 'سنة من الخبرة', value: '+15', icon: 'Award' },
+  { label: 'نظام متخصص', value: '+10', icon: 'Layout' },
+  { label: 'دعم فني 24/7', value: '100%', icon: 'Headset' }
+];
+
 const products = [
   {
     title: "الصيدليات",
@@ -108,32 +116,35 @@ const PlanCard = ({ plan, i, config }: { plan: any, i: number, config: any }) =>
       <div 
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className={`w-[300px] md:w-[380px] bg-white p-10 rounded-[3rem] shadow-xl border-2 transition-all duration-500 flex flex-col h-full ${isHovered ? 'border-orange-500/20' : 'border-transparent'}`}
+        className={`w-[260px] md:w-[320px] bg-white p-8 rounded-[2rem] shadow-xl border-2 transition-all duration-500 flex flex-col h-full justify-between ${isHovered ? 'border-orange-500/20' : 'border-transparent'}`}
       >
-        <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-10 transition-all duration-500 ${isHovered ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-slate-100 text-slate-400'}`}>
-          {i % 3 === 0 ? <Pill size={40} /> : i % 3 === 1 ? <Store size={40} /> : <Building2 size={40} />}
-        </div>
-        
-        <h3 className="text-3xl font-black text-slate-900 mb-4">{plan.name}</h3>
-        <p className="text-slate-400 font-bold mb-8">{plan.desc}</p>
-        
-        <div className="space-y-5 mb-12 flex-1">
-          {plan.features.map((f: any, j: number) => (
-            <div key={j} className={`flex gap-4 items-center font-bold text-lg text-right transition-colors ${isHovered ? 'text-slate-900' : 'text-slate-500'}`}>
-              <CheckCircle className={`transition-colors ${isHovered ? 'text-orange-500' : 'text-slate-200'}`} size={22} />
-              <span>{f}</span>
-            </div>
-          ))}
+        <div>
+          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-8 transition-all duration-500 ${isHovered ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20' : 'bg-slate-100 text-slate-400'}`}>
+            {i % 3 === 0 ? <Pill size={32} /> : i % 3 === 1 ? <Store size={32} /> : <Building2 size={32} />}
+          </div>
+          
+          <h3 className="text-2xl font-black text-slate-900 mb-2">{plan.name}</h3>
+          <p className="text-slate-400 font-bold mb-6 text-sm">{plan.desc}</p>
+
+          {/* Features List - FIXED to match dashboard */}
+          <ul className="space-y-3 mb-8">
+            {(plan.features || []).map((feat: string, idx: number) => (
+              <li key={idx} className="flex items-center gap-2 text-slate-600 font-bold text-sm">
+                <CheckCircle2 size={16} className="text-orange-500 shrink-0" />
+                <span>{feat}</span>
+              </li>
+            ))}
+          </ul>
         </div>
         
         <a 
           href={`https://wa.me/${config.whatsappPhone}?text=${encodeURIComponent(`أهلاً مودرن سوفت، أريد الاستفسار عن باقة: ${plan.name}`)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className={`py-6 rounded-3xl font-black text-xl text-center transition-all duration-500 flex items-center justify-center gap-3 ${isHovered ? 'bg-orange-500 text-white shadow-orange-500/20' : 'bg-slate-900 text-white shadow-slate-900/10'} shadow-xl`}
+          className={`py-4 mt-4 rounded-2xl font-black text-lg text-center transition-all duration-500 flex items-center justify-center gap-2 ${isHovered ? 'bg-orange-500 text-white shadow-orange-500/20' : 'bg-slate-900 text-white shadow-slate-900/10'} shadow-lg`}
         >
           <span>اشترك الآن</span>
-          <ChevronLeft size={20} className={isHovered ? '-translate-x-2 transition-transform' : ''} />
+          <ChevronLeft size={18} className={isHovered ? '-translate-x-2 transition-transform' : ''} />
         </a>
       </div>
     </FadeIn>
@@ -149,6 +160,29 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [config, setConfig] = useState<LandingConfig | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+
+  // Touch states for swipe
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+  
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStart) return;
+    const touchEnd = e.changedTouches[0].clientX;
+    const diff = touchStart - touchEnd;
+    
+    // Swipe left (next)
+    if (diff > 50) {
+      setActiveSlide(prev => (prev === (config?.products?.length || 4) - 1 ? 0 : prev + 1));
+    }
+    // Swipe right (prev)
+    if (diff < -50) {
+      setActiveSlide(prev => (prev === 0 ? (config?.products?.length || 4) - 1 : prev - 1));
+    }
+    setTouchStart(null);
+  };
 
   // --- Hash-based routing for product detail pages ---
   const openProduct = (product: any) => {
@@ -178,27 +212,93 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
   }, []);
 
   useEffect(() => {
+    // أولاً: جيب البيانات الأولية فوراً
     const fetchConfig = async () => {
       const data = await db.getLandingConfig();
       setConfig(data);
     };
     fetchConfig();
+
+    // ثانياً: اشترك في التغييرات الفورية من Firestore
+    let unsubscribe: (() => void) | null = null;
+    if (firestoreDb) {
+      try {
+        const landingRef = doc(firestoreDb, 'settings', 'landing');
+        unsubscribe = onSnapshot(landingRef, (docSnap) => {
+          if (docSnap.exists()) {
+            // استخدام البيانات مباشرة من الـ snapshot بدون قراءة إضافية
+            const data = docSnap.data() as LandingConfig;
+            setConfig(prev => ({ ...prev, ...data }));
+          }
+        }, (error) => {
+          console.warn('Firestore onSnapshot error, falling back to polling:', error);
+          // Fallback: polling كل 30 ثانية
+          const interval = setInterval(fetchConfig, 30000);
+          return () => clearInterval(interval);
+        });
+      } catch (e) {
+        console.warn('onSnapshot setup failed, using polling fallback');
+        const interval = setInterval(fetchConfig, 30000);
+        return () => clearInterval(interval);
+      }
+    } else {
+      // Offline mode: polling كل 30 ثانية
+      const interval = setInterval(fetchConfig, 30000);
+      return () => clearInterval(interval);
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
-  const displayProducts = defaultProducts; // Force new professional data
+  const displayProducts = (config?.products || defaultProducts);
+  const defaultIntegrations = [
+    {
+      flag: "🇪🇬",
+      country: "جمهورية مصر العربية",
+      title: "منظومة الفاتورة والإيصال الإلكتروني",
+      desc: "ربط مباشر ومعتمد مع منظومة الفاتورة الإلكترونية التابعة لمصلحة الضرائب المصرية",
+      accent: "border-t-red-500",
+      badgeBg: "bg-red-50 text-red-600 border-red-200",
+      badge: "مصر"
+    },
+    {
+      flag: "🇸🇦",
+      country: "المملكة العربية السعودية",
+      title: "هيئة الزكاة والضريبة والجمارك",
+      desc: "تكامل كامل مع منظومة فاتورة (FATOORA) وضريبة القيمة المضافة وفق اشتراطات ZATCA",
+      accent: "border-t-green-500",
+      badgeBg: "bg-green-50 text-green-700 border-green-200",
+      badge: "السعودية"
+    },
+    {
+      flag: "🇸🇦",
+      country: "المملكة العربية السعودية",
+      title: "هيئة الرصد والتحقق من المنتجات",
+      desc: "ربط تلقائي مع منظومة رصد للتحقق من مصدر المنتجات الصيدلانية وضمان سلامة سلسلة الإمداد",
+      accent: "border-t-blue-500",
+      badgeBg: "bg-blue-50 text-blue-700 border-blue-200",
+      badge: "السعودية"
+    }
+  ];
+  const displayIntegrations = (config?.integrations && config.integrations.length > 0)
+    ? config.integrations
+    : defaultIntegrations;
+  const displayFeatures = (config?.features || []);
   const displayTestimonials = (config?.testimonials || testimonials);
   const displayFaqs = (config?.faqs || faqs).map(f => ({
-    q: (f as any).q || (f as any).question,
-    a: (f as any).a || (f as any).answer
+    q: (f as any).question || (f as any).q || '',
+    a: (f as any).answer || (f as any).a || ''
   }));
   const displayPlans = (config?.plans || plans);
 
   useEffect(() => {
     const timer = setInterval(() => {
       setActiveSlide((prev) => (prev + 1) % displayProducts.length);
-    }, 6000);
+    }, 4000);
     return () => clearInterval(timer);
-  }, [displayProducts.length]);
+  }, [displayProducts.length, activeSlide]);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -260,47 +360,103 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
 
       <main>
         {/* --- HERO --- */}
-        <section id="home" className="pt-40 pb-24 md:pt-60 md:pb-32 px-6 bg-slate-50 relative overflow-hidden">
-          <div className="max-w-7xl mx-auto text-center relative z-10">
+        <section id="home" className="pt-32 pb-16 md:pt-48 md:pb-32 px-6 relative overflow-hidden flex items-center justify-center min-h-[80vh]">
+          {/* Background Image with Overlay */}
+          <div className="absolute inset-0 z-0">
+            <img 
+              src="https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=2072&auto=format&fit=crop" 
+              alt="Modern Soft Workspace" 
+              className="w-full h-full object-cover"
+            />
+            {/* Rich corporate blue tint using multiply, keeping image very clear */}
+            <div className="absolute inset-0 bg-slate-800/40 mix-blend-multiply" />
+            {/* Gradient overlay to ensure text readability exactly like the mockup */}
+            <div className="absolute inset-0 bg-gradient-to-b from-slate-900/10 via-slate-900/40 to-slate-900/90" />
+          </div>
+          {/* Bottom fade out to match next section */}
+          <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-white via-white/80 to-transparent z-10 pointer-events-none" />
+
+          <div className="max-w-7xl mx-auto text-center relative z-10 w-full mb-10">
             <FadeIn>
-               <h1 className="text-5xl md:text-8xl font-black text-slate-900 mb-8 leading-[1.1] tracking-tight">
-                  مؤسسة مودرن سوفت للبرمجيات
+               <h1 className="text-6xl md:text-8xl lg:text-[7rem] font-black mb-6 leading-tight tracking-tight drop-shadow-[0_10px_20px_rgba(0,0,0,0.4)] text-white">
+                  {config.heroTitle || 'مؤسسة مودرن سوفت للبرمجيات'}
                </h1>
-               <p className="text-xl md:text-2xl text-slate-500 font-bold max-w-4xl mx-auto mb-14 leading-relaxed px-4">
-                  متخصصون فى صناعه حلول برمجية متطورة لنمو اعمالك
+               <p className="text-xl md:text-3xl text-slate-100 font-bold max-w-5xl mx-auto mb-14 leading-relaxed px-4 drop-shadow-[0_4px_4px_rgba(0,0,0,0.6)]">
+                  {config.heroSubtitle || 'متخصصون فى صناعة حلول برمجية متطورة لنمو اعمالك'}
                </p>
                <div className="flex justify-center">
-                  <button onClick={onOpenChat} className="bg-[#1a1c23] text-white px-14 py-6 rounded-[2rem] font-black text-2xl hover:bg-orange-500 transition-all shadow-2xl shadow-orange-500/20 hover:-translate-y-1 flex items-center gap-4 group">
-                    {config.heroButtonText}<div className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center group-hover:bg-white/20 transition-colors"><Bot size={24} className="text-orange-400" /></div>
+                  <button onClick={onOpenChat} className="bg-orange-500 text-white px-10 py-5 md:px-14 md:py-6 rounded-full font-black text-xl md:text-2xl hover:bg-orange-600 transition-all shadow-2xl shadow-orange-500/30 hover:-translate-y-1 flex items-center gap-4 group">
+                    <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                      <Bot size={24} className="text-white" />
+                    </div>
+                    {config.heroButtonText || 'تحدث مع المساعد الذكي'}
                   </button>
                </div>
             </FadeIn>
           </div>
         </section>
+        
+        {/* --- STATS SECTION --- */}
+        <section className="py-10 bg-white relative z-20">
+          <div className="max-w-7xl mx-auto px-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+              {(config?.stats || defaultStats).map((stat, i) => (
+                <FadeIn key={i} delay={i * 0.1}>
+                  <div className="text-center p-6 rounded-3xl bg-slate-50 border border-slate-100 hover:border-orange-200 transition-all group">
+                    <div className="text-3xl md:text-5xl font-black text-slate-900 mb-2 group-hover:text-orange-500 transition-colors">
+                      {stat.value}
+                    </div>
+                    <div className="text-sm md:text-base font-bold text-slate-500">
+                      {stat.label}
+                    </div>
+                  </div>
+                </FadeIn>
+              ))}
+            </div>
+          </div>
+        </section>
 
         {/* --- PRODUCTS SLIDER --- */}
-        <section id="demo" className="h-screen px-6 bg-white overflow-hidden flex flex-col justify-center">
-          <div className="max-w-7xl mx-auto mb-6 text-center">
-             <FadeIn><h2 className="text-2xl md:text-4xl font-black text-slate-900 mb-3">حلول برمجية متكاملة تخدم نشاطك</h2><div className="w-16 h-1.5 bg-orange-500 mx-auto rounded-full" /></FadeIn>
+        <section id="demo" className="min-h-[70vh] px-6 bg-white overflow-hidden flex flex-col justify-center py-12 md:py-20">
+          <div className="max-w-7xl mx-auto mb-10 text-center">
+             <FadeIn><h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-4">حلول برمجية متكاملة تخدم نشاطك</h2><div className="w-16 h-1.5 bg-orange-500 mx-auto rounded-full" /></FadeIn>
           </div>
-          <div className="relative max-w-6xl mx-auto w-full">
+          <div className="relative max-w-6xl mx-auto w-full group">
              <FadeIn delay={0.2}>
-                <div className="overflow-hidden rounded-[2rem] shadow-2xl bg-white border border-slate-100">
+                {/* Arrows for Products Slider */}
+                <button 
+                  onClick={() => setActiveSlide(prev => (prev === 0 ? displayProducts.length - 1 : prev - 1))}
+                  className="absolute -right-2 md:-right-6 top-1/2 -translate-y-1/2 z-40 w-10 h-10 md:w-14 md:h-14 bg-white rounded-full shadow-lg flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100"
+                >
+                  <ChevronRight size={24} />
+                </button>
+                <button 
+                  onClick={() => setActiveSlide(prev => (prev === displayProducts.length - 1 ? 0 : prev + 1))}
+                  className="absolute -left-2 md:-left-6 top-1/2 -translate-y-1/2 z-40 w-10 h-10 md:w-14 md:h-14 bg-white rounded-full shadow-lg flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+
+                <div 
+                  className="overflow-hidden rounded-[2rem] shadow-2xl bg-white border border-slate-100"
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                >
                     <div className="flex transition-transform duration-1000 ease-in-out" style={{ transform: `translateX(${activeSlide * 100}%)` }}>
                        {displayProducts.map((product: any, index: number) => (
-                          <div key={index} className="w-full shrink-0 flex flex-col md:flex-row" style={{height: '52vh'}}>
-                             <div className="w-full md:w-1/2 relative h-40 md:h-auto"><img src={product.image} className="w-full h-full object-cover" alt="" /><div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" /></div>
-                             <div className="w-full md:w-1/2 p-5 md:p-8 flex flex-col justify-center text-right">
-                                <span className="text-orange-500 font-bold mb-1 block text-sm">{product.subtitle || product.name}</span>
-                                <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-2">{product.title || product.name}</h3>
-                                <p className="text-sm text-slate-500 font-bold mb-4 leading-relaxed line-clamp-2">{product.description}</p>
-                                <div className="flex justify-end">
+                          <div key={index} className="w-full shrink-0 flex flex-col md:flex-row h-auto md:h-[52vh]">
+                             <div className="w-full md:w-1/2 relative h-56 md:h-auto"><img src={product.image} className="w-full h-full object-cover" alt="" /><div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" /></div>
+                             <div className="w-full md:w-1/2 p-6 md:p-10 flex flex-col justify-center text-right">
+                                <span className="text-orange-500 font-bold mb-2 block text-sm">{product.subtitle || product.name}</span>
+                                <h3 className="text-2xl md:text-3xl font-black text-slate-900 mb-3">{product.title || product.name}</h3>
+                                <p className="text-base text-slate-500 font-bold mb-6 leading-relaxed line-clamp-3">{product.description}</p>
+                                <div className="flex justify-end mt-auto md:mt-0">
                                   <button
                                     onClick={() => openProduct(product)}
-                                    className="inline-flex items-center gap-2 bg-slate-900 text-white px-5 py-2 rounded-xl font-black text-sm hover:bg-orange-500 transition-all group"
+                                    className="inline-flex items-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl font-black text-sm hover:bg-orange-500 transition-all group"
                                   >
                                     <span>عرض التفاصيل</span>
-                                    <ArrowLeft size={15} className="group-hover:-translate-x-1 transition-transform" />
+                                    <ArrowLeft size={16} className="group-hover:-translate-x-1 transition-transform" />
                                   </button>
                                 </div>
                              </div>
@@ -308,7 +464,7 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
                        ))}
                     </div>
                 </div>
-                <div className="flex justify-center gap-3 mt-6">
+                <div className="flex justify-center gap-3 mt-8">
                    {displayProducts.map((_, i) => (<button key={i} onClick={() => setActiveSlide(i)} className={`h-2 transition-all duration-500 rounded-full ${activeSlide === i ? 'w-10 bg-orange-500' : 'w-4 bg-slate-200'}`} />))}
                 </div>
              </FadeIn>
@@ -316,10 +472,10 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
         </section>
 
         {/* --- PRICING SECTION --- */}
-        <section id="pricing" className="py-32 px-6 bg-slate-50 overflow-hidden">
+        <section id="pricing" className="py-16 md:py-24 px-6 bg-slate-50 overflow-hidden">
            <div className="max-w-7xl mx-auto relative px-4 md:px-12">
               <FadeIn>
-                  <div className="text-center mb-24">
+                  <div className="text-center mb-12">
                     <h2 className="text-4xl md:text-6xl font-black text-slate-900 mb-6">برامجنا</h2>
                     <p className="text-xl text-slate-500 font-bold max-w-2xl mx-auto">{config.plansSubtitle}</p>
                   </div>
@@ -327,16 +483,16 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
               
               <div className="relative group">
                  <button 
-                   onClick={() => document.getElementById('plans-container')?.scrollBy({ left: 450, behavior: 'smooth' })}
-                   className="absolute -right-4 lg:-right-10 top-1/2 -translate-y-1/2 z-40 w-14 h-14 bg-white rounded-full shadow-[0_10px_30px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all hidden md:flex border border-slate-100"
+                   onClick={() => document.getElementById('plans-container')?.scrollBy({ left: 300, behavior: 'smooth' })}
+                   className="absolute -right-2 md:-right-10 top-1/2 -translate-y-1/2 z-40 w-10 h-10 md:w-14 md:h-14 bg-white rounded-full shadow-[0_10px_30px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100"
                  >
-                   <ChevronRight size={28} />
+                   <ChevronRight size={24} />
                  </button>
                  <button 
-                   onClick={() => document.getElementById('plans-container')?.scrollBy({ left: -450, behavior: 'smooth' })}
-                   className="absolute -left-4 lg:-left-10 top-1/2 -translate-y-1/2 z-40 w-14 h-14 bg-white rounded-full shadow-[0_10px_30px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all hidden md:flex border border-slate-100"
+                   onClick={() => document.getElementById('plans-container')?.scrollBy({ left: -300, behavior: 'smooth' })}
+                   className="absolute -left-2 md:-left-10 top-1/2 -translate-y-1/2 z-40 w-10 h-10 md:w-14 md:h-14 bg-white rounded-full shadow-[0_10px_30px_rgba(0,0,0,0.1)] flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100"
                  >
-                   <ChevronLeft size={28} />
+                   <ChevronLeft size={24} />
                  </button>
 
                  <div id="plans-container" className="flex gap-8 overflow-x-auto pb-16 px-2 no-scrollbar snap-x scroll-smooth">
@@ -349,7 +505,7 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
         </section>
 
         {/* --- INTEGRATIONS & FEATURES --- */}
-        <section id="compare" className="py-28 px-6 bg-slate-50 relative overflow-hidden">
+        <section id="compare" className="py-16 md:py-20 px-6 bg-slate-50 relative overflow-hidden">
           {/* Background decoration */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <div className="absolute -top-40 -right-40 w-96 h-96 bg-orange-500/8 rounded-full blur-3xl" />
@@ -360,7 +516,7 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
 
             {/* --- Integrations --- */}
             <FadeIn>
-              <div className="text-center mb-16">
+              <div className="text-center mb-10">
                 <span className="inline-block bg-orange-500/10 text-orange-600 font-black text-sm px-5 py-2 rounded-full mb-5 tracking-widest uppercase border border-orange-500/20">ربط حكومي رسمي</span>
                 <h2 className="text-4xl md:text-6xl font-black text-slate-900 mb-5 leading-tight">
                   تكامل مع المنظومات
@@ -370,62 +526,47 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
               </div>
             </FadeIn>
 
-            <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 mb-24 pb-8 -mx-6 px-6 md:mx-0 md:px-0 md:grid md:grid-cols-3 md:pb-0 no-scrollbar" style={{ scrollBehavior: 'smooth' }}>
-              {[
-                {
-                  flag: "🇪🇬",
-                  country: "جمهورية مصر العربية",
-                  title: "منظومة الفاتورة والإيصال الإلكتروني",
-                  desc: "ربط مباشر ومعتمد مع منظومة الفاتورة الإلكترونية التابعة لمصلحة الضرائب المصرية",
-                  accent: "border-t-red-500",
-                  badgeBg: "bg-red-50 text-red-600 border-red-200",
-                  iconBg: "bg-red-50 text-red-500",
-                  badge: "مصر"
-                },
-                {
-                  flag: "🇸🇦",
-                  country: "المملكة العربية السعودية",
-                  title: "هيئة الزكاة والضريبة والجمارك",
-                  desc: "تكامل كامل مع منظومة فاتورة (FATOORA) وضريبة القيمة المضافة وفق اشتراطات ZATCA",
-                  accent: "border-t-green-500",
-                  badgeBg: "bg-green-50 text-green-700 border-green-200",
-                  iconBg: "bg-green-50 text-green-600",
-                  badge: "السعودية"
-                },
-                {
-                  flag: "🇸🇦",
-                  country: "المملكة العربية السعودية",
-                  title: "هيئة الرصد والتحقق من المنتجات",
-                  desc: "ربط تلقائي مع منظومة رصد للتحقق من مصدر المنتجات الصيدلانية وضمان سلامة سلسلة الإمداد",
-                  accent: "border-t-blue-500",
-                  badgeBg: "bg-blue-50 text-blue-700 border-blue-200",
-                  iconBg: "bg-blue-50 text-blue-600",
-                  badge: "السعودية"
-                }
-              ].map((item, i) => (
-                <FadeIn key={i} delay={i * 0.15} className="shrink-0 w-[85vw] sm:w-[320px] md:w-auto snap-center">
-                  <div className={`bg-white rounded-[2rem] p-8 h-full flex flex-col text-right shadow-md border border-slate-100 border-t-4 ${item.accent} group hover:-translate-y-2 hover:shadow-xl transition-all duration-500`}>
-                    <div className="flex justify-between items-start mb-6">
-                      <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${item.badgeBg}`}>{item.badge}</span>
-                      <div className="text-5xl">{item.flag}</div>
-                    </div>
-                    <p className="text-slate-400 font-bold text-sm mb-2">{item.country}</p>
-                    <h3 className="text-lg md:text-xl font-black text-slate-900 mb-4 leading-snug">{item.title}</h3>
-                    <p className="text-slate-500 font-bold text-sm leading-relaxed flex-1">{item.desc}</p>
-                    <div className="mt-6 pt-5 border-t border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="text-orange-500" size={17} />
-                        <span className="text-orange-600 font-black text-sm">معتمد ومرخّص رسمياً</span>
-                      </div>
-                    </div>
-                  </div>
-                </FadeIn>
-              ))}
+            <div className="relative group mb-12">
+               {/* Arrows (Mobile Only) */}
+               <button 
+                 onClick={() => document.getElementById('integrations-container')?.scrollBy({ left: 300, behavior: 'smooth' })}
+                 className="absolute -right-2 top-[40%] -translate-y-1/2 z-40 w-10 h-10 bg-white rounded-full shadow-lg items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100 flex md:hidden"
+               >
+                 <ChevronRight size={20} />
+               </button>
+               <button 
+                 onClick={() => document.getElementById('integrations-container')?.scrollBy({ left: -300, behavior: 'smooth' })}
+                 className="absolute -left-2 top-[40%] -translate-y-1/2 z-40 w-10 h-10 bg-white rounded-full shadow-lg items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100 flex md:hidden"
+               >
+                 <ChevronLeft size={20} />
+               </button>
+
+               <div id="integrations-container" className="flex overflow-x-auto snap-x snap-mandatory gap-6 pb-8 -mx-6 px-6 md:mx-0 md:px-0 md:grid md:grid-cols-3 md:pb-0 no-scrollbar" style={{ scrollBehavior: 'smooth' }}>
+                 {displayIntegrations.map((item, i) => (
+                   <FadeIn key={i} delay={i * 0.15} className="shrink-0 w-[85vw] sm:w-[320px] md:w-auto snap-center">
+                     <div className={`bg-white rounded-[2rem] p-8 h-full flex flex-col text-right shadow-md border border-slate-100 border-t-4 ${item.accent} group hover:-translate-y-2 hover:shadow-xl transition-all duration-500`}>
+                       <div className="flex justify-between items-start mb-6">
+                         <span className={`text-xs font-black px-3 py-1.5 rounded-full border ${item.badgeBg}`}>{item.badge}</span>
+                         <div className="text-5xl">{item.flag}</div>
+                       </div>
+                       <p className="text-slate-400 font-bold text-sm mb-2">{item.country}</p>
+                       <h3 className="text-lg md:text-xl font-black text-slate-900 mb-4 leading-snug">{item.title}</h3>
+                       <p className="text-slate-500 font-bold text-sm leading-relaxed flex-1">{item.desc}</p>
+                       <div className="mt-6 pt-5 border-t border-slate-100">
+                         <div className="flex items-center gap-2">
+                           <CheckCircle className="text-orange-500" size={17} />
+                           <span className="text-orange-600 font-black text-sm">معتمد ومرخّص رسمياً</span>
+                         </div>
+                       </div>
+                     </div>
+                   </FadeIn>
+                 ))}
+               </div>
             </div>
 
             {/* Divider */}
             <FadeIn>
-              <div className="flex items-center gap-6 mb-20">
+              <div className="flex items-center gap-6 mb-10">
                 <div className="flex-1 h-px bg-slate-200" />
                 <div className="w-3 h-3 bg-orange-500 rounded-full" />
                 <div className="flex-1 h-px bg-slate-200" />
@@ -434,74 +575,83 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
 
             {/* --- Features --- */}
             <FadeIn>
-              <div className="text-center mb-14">
-                <span className="inline-block bg-orange-500/10 text-orange-600 font-black text-sm px-5 py-2 rounded-full mb-5 tracking-widest uppercase border border-orange-500/20">لماذا مودرن سوفت؟</span>
-                <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-2">ما يميزنا عن غيرنا</h2>
+              <div className="text-center mb-10">
+                <span className="inline-block bg-orange-500/10 text-orange-600 font-black text-sm px-5 py-2 rounded-full mb-5 tracking-widest uppercase border border-orange-500/20">{config.featuresSubtitle || 'لماذا مودرن سوفت؟'}</span>
+                <h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-2">{config.featuresTitle || 'ما يميزنا عن غيرنا'}</h2>
                 <span className="text-sm font-bold text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full inline-block md:hidden mt-4">اسحب للمزيد ←</span>
               </div>
             </FadeIn>
 
-            <div className="flex overflow-x-auto snap-x snap-mandatory gap-6 pb-8 -mx-6 px-6 md:mx-0 md:px-0 md:grid md:grid-cols-3 md:pb-0 no-scrollbar" style={{ scrollBehavior: 'smooth' }}>
-              {[
-                {
-                  icon: <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-                  title: "نصلك أينما كنت",
-                  desc: "متواجدون داخل جميع المحافظات — فريقنا يصل إليك في أي مكان لضمان التركيب والدعم الميداني",
-                },
-                {
-                  icon: <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z" /></svg>,
-                  title: "أقوى دعم أونلاين مجاني",
-                  desc: "فريق دعم فني متخصص على مدار الساعة — بدون رسوم إضافية، لأن نجاحك هو نجاحنا",
-                },
-                {
-                  icon: <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>,
-                  title: "تحديثات مستمرة مجانية",
-                  desc: "تطويرات دورية تواكب تغيرات السوق والتشريعات الحكومية — نظامك دائماً محدّث وفي المقدمة",
-                }
-              ].map((item, i) => (
-                <FadeIn key={i} delay={i * 0.15} className="shrink-0 w-[85vw] sm:w-[320px] md:w-auto snap-center">
-                  <div className="bg-white rounded-[2rem] p-8 h-full flex flex-col text-right shadow-md border border-slate-100 group hover:-translate-y-2 hover:shadow-xl hover:border-orange-200 transition-all duration-500">
-                    <div className="w-14 h-14 bg-orange-50 border border-orange-100 rounded-2xl flex items-center justify-center text-orange-500 mb-6 group-hover:bg-orange-500 group-hover:text-white group-hover:border-orange-500 transition-all duration-500 self-end">
-                      {item.icon}
-                    </div>
-                    <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-4">{item.title}</h3>
-                    <p className="text-slate-500 font-bold text-sm leading-relaxed flex-1">{item.desc}</p>
-                    <div className="mt-6 pt-5 border-t border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="text-orange-500" size={17} />
-                        <span className="text-orange-600 font-black text-sm">ميزة حصرية في مودرن سوفت</span>
-                      </div>
-                    </div>
-                  </div>
-                </FadeIn>
-              ))}
+            <div className="relative group pb-8">
+               <button 
+                 onClick={() => document.getElementById('features-container')?.scrollBy({ left: 300, behavior: 'smooth' })}
+                 className="absolute -right-2 top-[45%] -translate-y-1/2 z-40 w-10 h-10 bg-white rounded-full shadow-lg items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100 flex md:hidden"
+               >
+                 <ChevronRight size={20} />
+               </button>
+               <button 
+                 onClick={() => document.getElementById('features-container')?.scrollBy({ left: -300, behavior: 'smooth' })}
+                 className="absolute -left-2 top-[45%] -translate-y-1/2 z-40 w-10 h-10 bg-white rounded-full shadow-lg items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100 flex md:hidden"
+               >
+                 <ChevronLeft size={20} />
+               </button>
+
+               <div id="features-container" className="flex overflow-x-auto snap-x snap-mandatory gap-6 -mx-6 px-6 md:mx-0 md:px-0 md:grid md:grid-cols-3 md:pb-0 no-scrollbar" style={{ scrollBehavior: 'smooth' }}>
+                 {displayFeatures.map((item: any, i: number) => (
+                   <FadeIn key={i} delay={i * 0.15} className="shrink-0 w-[85vw] sm:w-[320px] md:w-auto snap-center">
+                     <div className="bg-white rounded-[2rem] p-8 h-full flex flex-col text-right shadow-md border border-slate-100 group hover:-translate-y-2 hover:shadow-xl hover:border-orange-200 transition-all duration-500">
+                       <div className="w-14 h-14 bg-orange-50 border border-orange-100 rounded-2xl flex items-center justify-center text-orange-500 mb-6 group-hover:bg-orange-500 group-hover:text-white group-hover:border-orange-500 transition-all duration-500 self-end text-3xl">
+                         {item.icon || '⚡'}
+                       </div>
+                       <h3 className="text-xl md:text-2xl font-black text-slate-900 mb-4">{item.title}</h3>
+                       <p className="text-slate-500 font-bold text-sm leading-relaxed flex-1">{item.desc}</p>
+
+                     </div>
+                   </FadeIn>
+                 ))}
+               </div>
             </div>
 
           </div>
         </section>
 
         {/* --- TESTIMONIALS --- */}
-        <section id="testimonials" className="py-32 px-6 bg-[#f8f9fa]">
+        <section id="testimonials" className="py-16 md:py-24 px-6 bg-[#f8f9fa]">
            <div className="max-w-7xl mx-auto">
-              <FadeIn><div className="text-center mb-20"><h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6">آراء شركاء النجاح</h2><p className="text-xl text-slate-500 font-bold max-w-3xl mx-auto">نفخر بثقة آلاف العملاء في أنظمتنا.</p></div></FadeIn>
-              <div className="flex gap-8 overflow-x-auto pb-12 px-4 no-scrollbar snap-x">
-                 {displayTestimonials.map((t: any, i: number) => (
-                    <FadeIn key={i} delay={i * 0.1} className="snap-center">
-                       <div className="min-w-[300px] md:min-w-[400px] bg-white p-10 rounded-3xl shadow-lg border border-slate-50">
-                          <div className="flex justify-end gap-1 mb-6">{[...Array(t.rating)].map((_, i) => <Star key={i} size={16} fill="#ffb800" className="text-[#ffb800]" />)}</div>
-                          <p className="text-lg text-slate-600 font-bold leading-relaxed mb-10 text-right">"{t.text}"</p>
-                          <div className="flex items-center justify-end gap-4"><div className="text-right"><div className="font-black text-slate-900 text-lg">{t.name}</div><div className="text-slate-400 font-bold text-sm">{t.role}</div></div><div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center font-black text-orange-500">{t.name[0]}</div></div>
-                       </div>
-                    </FadeIn>
-                 ))}
+              <FadeIn><div className="text-center mb-12"><h2 className="text-4xl md:text-5xl font-black text-slate-900 mb-6">آراء شركاء النجاح</h2><p className="text-xl text-slate-500 font-bold max-w-3xl mx-auto">نفخر بثقة آلاف العملاء في أنظمتنا.</p></div></FadeIn>
+              <div className="relative group">
+                 <button 
+                   onClick={() => document.getElementById('testimonials-container')?.scrollBy({ left: 350, behavior: 'smooth' })}
+                   className="absolute -right-2 md:-right-6 top-1/2 -translate-y-1/2 z-40 w-10 h-10 md:w-12 md:h-12 bg-white rounded-full shadow-lg flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100"
+                 >
+                   <ChevronRight size={24} />
+                 </button>
+                 <button 
+                   onClick={() => document.getElementById('testimonials-container')?.scrollBy({ left: -350, behavior: 'smooth' })}
+                   className="absolute -left-2 md:-left-6 top-1/2 -translate-y-1/2 z-40 w-10 h-10 md:w-12 md:h-12 bg-white rounded-full shadow-lg flex items-center justify-center text-slate-900 hover:bg-slate-900 hover:text-white transition-all border border-slate-100"
+                 >
+                   <ChevronLeft size={24} />
+                 </button>
+
+                 <div id="testimonials-container" className="flex gap-8 overflow-x-auto pb-12 px-4 no-scrollbar snap-x scroll-smooth">
+                    {displayTestimonials.map((t: any, i: number) => (
+                       <FadeIn key={i} delay={i * 0.1} className="snap-center">
+                          <div className="min-w-[300px] md:min-w-[400px] bg-white p-10 rounded-3xl shadow-lg border border-slate-50">
+                             <div className="flex justify-end gap-1 mb-6">{[...Array(t.rating)].map((_, i) => <Star key={i} size={16} fill="#ffb800" className="text-[#ffb800]" />)}</div>
+                             <p className="text-lg text-slate-600 font-bold leading-relaxed mb-10 text-right">"{t.text}"</p>
+                             <div className="flex items-center justify-end gap-4"><div className="text-right"><div className="font-black text-slate-900 text-lg">{t.name}</div><div className="text-slate-400 font-bold text-sm">{t.role}</div></div><div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center font-black text-orange-500">{t.name[0]}</div></div>
+                          </div>
+                       </FadeIn>
+                    ))}
+                 </div>
               </div>
            </div>
         </section>
 
         {/* --- FAQ --- */}
-        <section id="faq" className="py-32 px-6 bg-white">
+        <section id="faq" className="py-16 md:py-24 px-6 bg-white">
            <div className="max-w-4xl mx-auto">
-              <FadeIn><h2 className="text-4xl md:text-5xl font-black text-slate-900 text-center mb-20">الأسئلة الشائعة</h2></FadeIn>
+              <FadeIn><h2 className="text-4xl md:text-5xl font-black text-slate-900 text-center mb-12">الأسئلة الشائعة</h2></FadeIn>
               <div className="space-y-6">
                  {displayFaqs.map((faq, i) => (
                     <FadeIn key={i} delay={i * 0.1}>
@@ -516,17 +666,17 @@ export default function NewLanding({ onOpenChat, onSecretClick }: any) {
         </section>
 
         {/* --- CTA --- */}
-        <section className="py-32 px-6 bg-white">
+        <section id="cta" className="py-16 md:py-24 px-6 bg-white">
            <FadeIn>
-              <div className="max-w-6xl mx-auto bg-[#1a1c23] rounded-[4rem] p-16 md:p-32 text-center text-white relative overflow-hidden">
-                 <h2 className="text-4xl md:text-7xl font-black mb-12 tracking-tight">انضم لعالم <span className="text-orange-500">مودرن سوفت</span> وطوّر عملك</h2>
+              <div className="max-w-6xl mx-auto bg-[#1a1c23] rounded-[4rem] p-12 md:p-24 text-center text-white relative overflow-hidden">
+                 <h2 className="text-4xl md:text-7xl font-black mb-8 tracking-tight">انضم لعالم <span className="text-orange-500">مودرن سوفت</span> وطوّر عملك</h2>
                  <a href={`tel:${config.contactPhone}`} className="bg-orange-500 text-white px-16 py-6 rounded-3xl font-black text-2xl hover:bg-orange-400 transition-all shadow-2xl relative z-10 inline-block">اتصل بالمبيعات الآن</a>
               </div>
            </FadeIn>
         </section>
       </main>
 
-      <footer className="py-24 bg-[#0a0b0e] text-white border-t border-white/5">
+      <footer className="py-12 md:py-20 bg-[#0a0b0e] text-white border-t border-white/5">
          <div className="max-w-7xl mx-auto px-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-16 mb-20 text-right">
                <div className="lg:col-span-2">

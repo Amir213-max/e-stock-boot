@@ -294,7 +294,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     ? `Client Name: ${customer.name}\nContract Number: ${customer.contractNumber}\nPrevious Logins: ${new Date(Number(customer.lastLogin)).toLocaleDateString()}`
                     : "Client: Guest/Unknown";
 
-                const systemInstruction = `You are "E-stock Bot" (مساعد إي ستوك), a dedicated and expert TECHNICAL SUPPORT agent for Modern Soft. Your specific assignment is to support users of the **${sysType}** software.
+                const systemInstruction = `You are "Boko Bot" (بوكو بوت), a dedicated and expert TECHNICAL SUPPORT agent for Modern Soft. Your specific assignment is to support users of the **${sysType}** software.
                     
                     **YOUR IDENTITY & TONE:**
                     - You are a smart, friendly, and expert support agent.
@@ -338,7 +338,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                 setMessages([{
                     id: 'init',
                     role: 'model',
-                    text: 'أهلاً بحضرتك في الدعم الفني لشركة Modern Soft 🧡\nمعاك المساعد الذكي لنظام E-stock، وأنا هنا عشان أساعدك في أي وقت.\n\nعشان أقدر أخدمك بأفضل شكل، ممكن أتشرف ببيانات حضرتك؟\n(الاسم، اسم الصيدلية، رقم التليفون، والعنوان)\n\nوبعدها أمرني، أنا معاك.',
+                    text: `أنا بوكو بوت، المساعد الذكي لبرنامج ${sysType}. تحت أمرك في أي حاجة تحتاجها بخصوص البرنامج. إزاي أقدر أساعدك النهاردة؟`,
                     timestamp: new Date()
                 }]);
             } catch (error) {

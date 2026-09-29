@@ -71,6 +71,16 @@ export interface Stat {
   icon: string;
 }
 
+export interface Integration {
+  flag: string;
+  country: string;
+  title: string;
+  desc: string;
+  badge: string;
+  accent: string;
+  badgeBg: string;
+}
+
 export interface Plan {
   name: string;
   desc: string;
@@ -121,6 +131,16 @@ export interface LandingConfig {
 
   // FAQs
   faqs: FAQ[];
+
+  // Integrations Section
+  integrations?: Integration[];
+
+  // ModernSoftLanding Specific (About/Contact Pages)
+  aboutPageTitle?: string;
+  aboutPageContent?: string;
+  aboutPageImage?: string;
+  contactPageTitle?: string;
+  contactMapUrl?: string;
 }
 
 export type SystemType = 'e-Stock Pharmacy' | 'e-Stock Retail' | 'Pharma Store';

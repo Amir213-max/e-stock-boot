@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
-import { KBItem, ChatLog, Feedback, KnowledgeSnippet, Customer, SystemType } from '../types';
+import { KBItem, ChatLog, Feedback, KnowledgeSnippet, Customer, SystemType, LandingConfig } from '../types';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { GoogleGenAI } from '@google/genai';
 import BotInterface from './BotInterface';
@@ -332,7 +332,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
     const [trainingPassword, setTrainingPassword] = useState('');
     const [trainingPasswordError, setTrainingPasswordError] = useState('');
 
-    const [activeTab, setActiveTab] = useState<'analytics' | 'history' | 'training' | 'settings'>('analytics');
+    const [activeTab, setActiveTab] = useState<'analytics' | 'history' | 'training' | 'landing' | 'settings'>('analytics');
+    const [landingConfig, setLandingConfig] = useState<LandingConfig | null>(null);
+    const [isSavingLanding, setIsSavingLanding] = useState(false);
     const [cloudStatus, setCloudStatus] = useState<'checking' | 'online' | 'offline' | 'error'>('checking');
     const [activeSystemType, setActiveSystemType] = useState<SystemType>('e-Stock Pharmacy');
     const [newCustomerSystemType, setNewCustomerSystemType] = useState<SystemType>('e-Stock Pharmacy');
@@ -366,6 +368,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
 
     // Unanswered Inbox State
     const [unansweredLogs, setUnansweredLogs] = useState<ChatLog[]>([]);
+    const [expandedUnansweredId, setExpandedUnansweredId] = useState<string | null>(null);
     
     // Live Testing Arena State
     const [showTestBot, setShowTestBot] = useState(false);
@@ -524,6 +527,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         const settings = await db.getAppSettings();
         setCustomers(cust);
         setSessionTimeout(settings.sessionTimeoutMinutes);
+        
+        const lConfig = await db.getLandingConfig();
+        setLandingConfig(lConfig);
     };
 
     // Load Snippets and Menus whenever the active system tab changes
@@ -611,7 +617,15 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
         // If it was from an unanswered log, we should mark it as resolved (delete the log or just update it)
         if (logIdToRemove) {
             alert('تم حفظ المعلومة وتدريب البوت عليها!');
+            await db.dismissUnansweredLog(logIdToRemove);
             setUnansweredLogs(prev => prev.filter(l => l.id !== logIdToRemove));
+        }
+    };
+
+    const handleDismissUnanswered = async (logId: string) => {
+        if (window.confirm('هل تريد حذف هذا السؤال من صندوق الأسئلة المفقودة؟')) {
+            await db.dismissUnansweredLog(logId);
+            setUnansweredLogs(prev => prev.filter(l => l.id !== logId));
         }
     };
 
@@ -1516,6 +1530,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                     تدريب البوت (المعرفة)
                                 </button>
                                 <button
+                                    onClick={() => setActiveTab('landing')}
+                                    className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'landing' ? 'bg-white dark:bg-gray-600 text-orange-600 dark:text-orange-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
+                                >
+                                    🌐 الصفحة الرئيسية
+                                </button>
+                                <button
                                     onClick={() => setActiveTab('settings')}
                                     className={`flex-1 md:flex-none px-5 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${activeTab === 'settings' ? 'bg-white dark:bg-gray-600 text-blue-600 dark:text-blue-300 shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}
                                 >
@@ -1776,24 +1796,74 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
                                 </p>
                                 <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
                                    {unansweredLogs.map(log => {
-                                       const qArr = log.userQuery.split('🤖');
-                                       const lastQ = qArr[qArr.length - 1].replace('E-stock Bot:', '').replace(/👤 العميل:/g, '').trim();
+                                       // Extract user's question accurately
+                                       const rawLines = (log.userQuery || '').split('\n').map(l => l.trim()).filter(Boolean);
+                                       const userLines = rawLines.filter(l => l.startsWith('👤') || l.includes('العميل'));
+                                       let lastQ = '';
+                                       if (userLines.length > 0) {
+                                           lastQ = userLines[userLines.length - 1].replace(/^👤[^:]*:\s*/, '').trim();
+                                       } else if (log.userQuery && log.userQuery.includes('🤖')) {
+                                           lastQ = log.userQuery.split('🤖')[0].replace(/^👤[^:]*:\s*/, '').trim();
+                                       } else {
+                                           lastQ = (log.userQuery || '').trim();
+                                       }
+                                       const isExpanded = expandedUnansweredId === log.id;
+
                                        return (
                                        <div key={log.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-red-100 dark:border-red-900 flex flex-col gap-2 shadow-sm">
-                                            <p className="text-sm font-bold text-gray-800 dark:text-gray-200">سؤال العميل:</p>
-                                            <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700 p-2 rounded">{lastQ}</p>
-                                            
+                                            <div className="flex items-center justify-between">
+                                                <p className="text-sm font-bold text-gray-800 dark:text-gray-200">سؤال العميل:</p>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setExpandedUnansweredId(isExpanded ? null : log.id)}
+                                                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1 transition"
+                                                >
+                                                    <span>{isExpanded ? '🔼' : '💬'}</span>
+                                                    <span>{isExpanded ? 'إخفاء المحادثة' : 'عرض المحادثة كاملة'}</span>
+                                                </button>
+                                            </div>
+                                            <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-700/60 p-2.5 rounded-lg border border-gray-100 dark:border-gray-600 font-medium">{lastQ || 'سؤال غير محدد'}</p>
+
+                                            {isExpanded && (
+                                                <div className="my-1 p-3 bg-gray-50 dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-700 max-h-56 overflow-y-auto space-y-2 scrollbar-thin">
+                                                    <p className="text-[11px] font-bold text-gray-400 mb-1">سجل المحادثة بالكامل:</p>
+                                                    {(log.userQuery || '').split('\n\n').map((line, li) => {
+                                                        const isClient = line.startsWith('👤') || line.includes('العميل');
+                                                        return (
+                                                            <div key={li} className={`text-xs p-2.5 rounded-lg leading-relaxed ${
+                                                                isClient 
+                                                                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-900 dark:text-blue-200' 
+                                                                    : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-300 border border-gray-100 dark:border-gray-700'
+                                                            }`}>
+                                                                {line}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                             
                                             <textarea 
                                                 id={`ans_${log.id}`}
                                                 placeholder="اكتب الإجابة هنا لتعليم البوت..."
-                                                className="w-full mt-2 p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-800 dark:text-gray-200"
+                                                className="w-full mt-2 p-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:border-red-400"
                                             />
-                                            <button 
-                                                onClick={async () => {
-                                                    const ans = (document.getElementById(`ans_${log.id}`) as HTMLTextAreaElement).value;
-                                                    if(ans) await handleAddSnippet(lastQ, ans, log.id);
-                                                }}
-                                                className="self-end bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition">حفظ وتدريب البوت</button>
+                                            <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100 dark:border-gray-700/60">
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => handleDismissUnanswered(log.id)}
+                                                    className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-semibold px-2.5 py-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition flex items-center gap-1"
+                                                    title="حذف هذا السؤال من صندوق الأسئلة المفقودة"
+                                                >
+                                                    <span>🗑️</span>
+                                                    <span>حذف من الصندوق</span>
+                                                </button>
+                                                <button 
+                                                    onClick={async () => {
+                                                        const ans = (document.getElementById(`ans_${log.id}`) as HTMLTextAreaElement).value;
+                                                        if(ans) await handleAddSnippet(lastQ, ans, log.id);
+                                                    }}
+                                                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition shadow-sm">حفظ وتدريب البوت</button>
+                                            </div>
                                        </div>
                                        );
                                    })}
@@ -2384,6 +2454,652 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
 
 
                 {/* --- Settings & Users Section --- */}
+                {activeTab === 'landing' && landingConfig && (
+                    <div className="space-y-6 animate-in fade-in duration-300 pb-20 text-right" dir="rtl">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-2xl font-black text-gray-800 dark:text-white">إدارة محتوى الصفحة الرئيسية</h2>
+                            <button 
+                                onClick={async () => {
+                                    if (!landingConfig) return;
+                                    setIsSavingLanding(true);
+                                    try {
+                                        // Ensure sync between both whatsapp fields
+                                        const finalConfig = { 
+                                            ...landingConfig, 
+                                            whatsappNumber: landingConfig.whatsappPhone || landingConfig.whatsappNumber 
+                                        };
+                                        await db.saveLandingConfig(finalConfig);
+                                        setLandingConfig(finalConfig);
+                                        alert('✅ تم حفظ تعديلات الموقع بنجاح!');
+                                    } catch (err: any) {
+                                        console.error(err);
+                                        alert('❌ حدث خطأ أثناء الحفظ في قاعدة البيانات. يرجى التحقق من الاتصال.');
+                                    } finally {
+                                        setIsSavingLanding(false);
+                                    }
+                                }}
+                                disabled={isSavingLanding}
+                                className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg transition-all flex items-center gap-2"
+                            >
+                                {isSavingLanding ? 'جاري الحفظ...' : 'حفظ كافة التعديلات'}
+                                <span>💾</span>
+                            </button>
+                        </div>
+
+                        {/* --- HERO SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-orange-100 dark:bg-orange-900/30 rounded-lg text-orange-600">🚀</span>
+                                الجزء العلوي (Hero Section)
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">العنوان الرئيسي</label>
+                                    <textarea 
+                                        value={landingConfig.heroTitle}
+                                        onChange={e => setLandingConfig({...landingConfig, heroTitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                        rows={2}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">العنوان الفرعي</label>
+                                    <textarea 
+                                        value={landingConfig.heroSubtitle}
+                                        onChange={e => setLandingConfig({...landingConfig, heroSubtitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        rows={3}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">نص زر المساعد الذكي</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.heroButtonText}
+                                        onChange={e => setLandingConfig({...landingConfig, heroButtonText: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* --- PRODUCTS SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-pink-100 dark:bg-pink-900/30 rounded-lg text-pink-600">📦</span>
+                                قسم الأنظمة الأساسية (المنتجات)
+                            </h3>
+                            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">عنوان القسم</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.productsTitle}
+                                        onChange={e => setLandingConfig({...landingConfig, productsTitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">وصف القسم</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.productsSubtitle}
+                                        onChange={e => setLandingConfig({...landingConfig, productsSubtitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {landingConfig.products.map((prod, idx) => (
+                                    <div key={idx} className="p-6 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-bold text-gray-400">نظام #{idx + 1}</span>
+                                            <button 
+                                                onClick={() => {
+                                                    const newProds = [...landingConfig.products];
+                                                    newProds.splice(idx, 1);
+                                                    setLandingConfig({...landingConfig, products: newProds});
+                                                }}
+                                                className="text-red-500 text-[10px] font-bold hover:underline"
+                                            >حذف ✕</button>
+                                        </div>
+                                        <input 
+                                            type="text"
+                                            placeholder="اسم النظام"
+                                            value={prod.name}
+                                            onChange={e => {
+                                                const newProds = [...landingConfig.products];
+                                                newProds[idx].name = e.target.value;
+                                                setLandingConfig({...landingConfig, products: newProds});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-bold"
+                                        />
+                                        <textarea 
+                                            placeholder="وصف النظام"
+                                            value={prod.description}
+                                            onChange={e => {
+                                                const newProds = [...landingConfig.products];
+                                                newProds[idx].description = e.target.value;
+                                                setLandingConfig({...landingConfig, products: newProds});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                            rows={2}
+                                        />
+                                        <input 
+                                            type="text"
+                                            placeholder="رابط الصورة (URL)"
+                                            value={prod.image}
+                                            onChange={e => {
+                                                const newProds = [...landingConfig.products];
+                                                newProds[idx].image = e.target.value;
+                                                setLandingConfig({...landingConfig, products: newProds});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-[10px] font-mono"
+                                        />
+                                    </div>
+                                ))}
+                                <button 
+                                    onClick={() => {
+                                        setLandingConfig({
+                                            ...landingConfig, 
+                                            products: [...landingConfig.products, { id: Date.now().toString(), name: 'نظام جديد', description: '', image: '' }]
+                                        });
+                                    }}
+                                    className="md:col-span-2 py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-gray-400 hover:text-pink-500 hover:border-pink-500 transition-all font-bold text-sm"
+                                >+ إضافة نظام جديد</button>
+                            </div>
+                        </div>
+
+                        {/* --- FEATURES SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg text-yellow-600">⭐</span>
+                                قسم مميزات مودرن سوفت (لماذا تختارنا؟)
+                            </h3>
+                            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">عنوان القسم</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.featuresTitle}
+                                        onChange={e => setLandingConfig({...landingConfig, featuresTitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">وصف القسم</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.featuresSubtitle}
+                                        onChange={e => setLandingConfig({...landingConfig, featuresSubtitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                {landingConfig.features.map((feat, idx) => (
+                                    <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-bold text-gray-400">ميزة #{idx + 1}</span>
+                                            <button 
+                                                onClick={() => {
+                                                    const newFeats = [...landingConfig.features];
+                                                    newFeats.splice(idx, 1);
+                                                    setLandingConfig({...landingConfig, features: newFeats});
+                                                }}
+                                                className="text-red-500 text-[10px] font-bold hover:underline"
+                                            >حذف ✕</button>
+                                        </div>
+                                        <input 
+                                            type="text"
+                                            placeholder="عنوان الميزة"
+                                            value={feat.title}
+                                            onChange={e => {
+                                                const newFeats = [...landingConfig.features];
+                                                newFeats[idx].title = e.target.value;
+                                                setLandingConfig({...landingConfig, features: newFeats});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-bold"
+                                        />
+                                        <textarea 
+                                            placeholder="وصف الميزة"
+                                            value={feat.desc}
+                                            onChange={e => {
+                                                const newFeats = [...landingConfig.features];
+                                                newFeats[idx].desc = e.target.value;
+                                                setLandingConfig({...landingConfig, features: newFeats});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-[11px]"
+                                            rows={3}
+                                        />
+                                    </div>
+                                ))}
+                                <button 
+                                    onClick={() => {
+                                        setLandingConfig({
+                                            ...landingConfig, 
+                                            features: [...landingConfig.features, { title: 'ميزة جديدة', desc: '', icon: 'Zap' }]
+                                        });
+                                    }}
+                                    className="md:col-span-3 py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-gray-400 hover:text-yellow-500 hover:border-yellow-500 transition-all font-bold text-sm"
+                                >+ إضافة ميزة جديدة</button>
+                            </div>
+                        </div>
+
+
+
+                        {/* --- STATS SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg text-indigo-600">📊</span>
+                                قسم الإحصائيات (الأرقام)
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                {landingConfig.stats.map((stat, idx) => (
+                                    <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-2">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-[10px] font-bold text-gray-400">إحصائية #{idx + 1}</span>
+                                            <button 
+                                                onClick={() => {
+                                                    const newStats = [...landingConfig.stats];
+                                                    newStats.splice(idx, 1);
+                                                    setLandingConfig({...landingConfig, stats: newStats});
+                                                }}
+                                                className="text-red-500 text-[10px] font-bold hover:underline"
+                                            >حذف</button>
+                                        </div>
+                                        <input 
+                                            type="text"
+                                            placeholder="الرقم (مثلاً: +500)"
+                                            value={stat.value}
+                                            onChange={e => {
+                                                const newStats = [...landingConfig.stats];
+                                                newStats[idx].value = e.target.value;
+                                                setLandingConfig({...landingConfig, stats: newStats});
+                                            }}
+                                            className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-black text-indigo-600"
+                                        />
+                                        <input 
+                                            type="text"
+                                            placeholder="الوصف (مثلاً: عميل)"
+                                            value={stat.label}
+                                            onChange={e => {
+                                                const newStats = [...landingConfig.stats];
+                                                newStats[idx].label = e.target.value;
+                                                setLandingConfig({...landingConfig, stats: newStats});
+                                            }}
+                                            className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-[11px] font-bold"
+                                        />
+                                    </div>
+                                ))}
+                                <button 
+                                    onClick={() => {
+                                        setLandingConfig({
+                                            ...landingConfig, 
+                                            stats: [...landingConfig.stats, { label: 'إحصائية جديدة', value: '0', icon: 'Activity' }]
+                                        });
+                                    }}
+                                    className="md:col-span-4 py-2 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-gray-400 hover:text-indigo-500 hover:border-indigo-500 transition-all font-bold text-xs"
+                                >+ إضافة إحصائية</button>
+                            </div>
+                        </div>
+
+                        {/* --- PLANS SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600">💎</span>
+                                قسم البرامج والأسعار
+                            </h3>
+                            <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">عنوان القسم</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.plansTitle}
+                                        onChange={e => setLandingConfig({...landingConfig, plansTitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">وصف القسم</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.plansSubtitle}
+                                        onChange={e => setLandingConfig({...landingConfig, plansSubtitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                {landingConfig.plans.map((plan, idx) => (
+                                    <div key={idx} className="p-6 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-700">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h4 className="font-black text-blue-600 dark:text-blue-400">باقة: {plan.name}</h4>
+                                            <button 
+                                                onClick={() => {
+                                                    const newPlans = [...landingConfig.plans];
+                                                    newPlans.splice(idx, 1);
+                                                    setLandingConfig({...landingConfig, plans: newPlans});
+                                                }}
+                                                className="text-red-500 text-xs font-bold hover:underline"
+                                            >حذف الباقة ✕</button>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <input 
+                                                type="text"
+                                                placeholder="اسم الباقة"
+                                                value={plan.name}
+                                                onChange={e => {
+                                                    const newPlans = [...landingConfig.plans];
+                                                    newPlans[idx].name = e.target.value;
+                                                    setLandingConfig({...landingConfig, plans: newPlans});
+                                                }}
+                                                className="px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                            />
+                                            <input 
+                                                type="text"
+                                                placeholder="وصف الباقة (Subtext)"
+                                                value={plan.desc}
+                                                onChange={e => {
+                                                    const newPlans = [...landingConfig.plans];
+                                                    newPlans[idx].desc = e.target.value;
+                                                    setLandingConfig({...landingConfig, plans: newPlans});
+                                                }}
+                                                className="px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                            />
+                                            <div className="md:col-span-2">
+                                                <label className="block text-[10px] font-bold text-gray-400 mb-1">المميزات (ميزة في كل سطر أو مفصولة بفاصلة)</label>
+                                                <textarea 
+                                                    value={plan.features.join('\n')}
+                                                    onChange={e => {
+                                                        const newPlans = [...landingConfig.plans];
+                                                        // Split by newline or comma
+                                                        newPlans[idx].features = e.target.value.split(/[\n,]/).map(s => s.trim()).filter(s => s !== '');
+                                                        setLandingConfig({...landingConfig, plans: newPlans});
+                                                    }}
+                                                    className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                                    rows={4}
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                                <button 
+                                    onClick={() => {
+                                        setLandingConfig({
+                                            ...landingConfig, 
+                                            plans: [...landingConfig.plans, { name: 'باقة جديدة', desc: '', features: [], highlight: false }]
+                                        });
+                                    }}
+                                    className="w-full py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-gray-400 hover:text-blue-500 hover:border-blue-500 transition-all font-bold text-sm"
+                                >+ إضافة باقة جديدة</button>
+                            </div>
+                        </div>
+
+                        {/* --- FOOTER & CONTACT SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg text-emerald-600">📞</span>
+                                بيانات التواصل والتذييل (Footer)
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">نبذة عن الشركة (Footer About)</label>
+                                    <textarea 
+                                        value={landingConfig.aboutCompanyText}
+                                        onChange={e => setLandingConfig({...landingConfig, aboutCompanyText: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        rows={3}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">البريد الإلكتروني</label>
+                                    <input 
+                                        type="email"
+                                        value={landingConfig.contactEmail}
+                                        onChange={e => setLandingConfig({...landingConfig, contactEmail: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">رقم المبيعات (Call)</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.contactPhone}
+                                        onChange={e => setLandingConfig({...landingConfig, contactPhone: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">رقم الواتساب (لأزرار الاشتراك)</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.whatsappPhone}
+                                        onChange={e => setLandingConfig({...landingConfig, whatsappPhone: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        placeholder="مثال: 201234567890"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">العنوان</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.contactAddress}
+                                        onChange={e => setLandingConfig({...landingConfig, contactAddress: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">نص حقوق الملكية (Copyright)</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.footerText}
+                                        onChange={e => setLandingConfig({...landingConfig, footerText: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* --- ABOUT & CONTACT SUB-PAGES --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg text-indigo-600">📄</span>
+                                الصفحات الفرعية (من نحن واتصل بنا)
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">عنوان صفحة "من نحن"</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.aboutPageTitle || ''}
+                                        onChange={e => setLandingConfig({...landingConfig, aboutPageTitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                    />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">محتوى صفحة "من نحن"</label>
+                                    <textarea 
+                                        value={landingConfig.aboutPageContent || ''}
+                                        onChange={e => setLandingConfig({...landingConfig, aboutPageContent: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        rows={4}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">رابط صورة صفحة "من نحن"</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.aboutPageImage || ''}
+                                        onChange={e => setLandingConfig({...landingConfig, aboutPageImage: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        dir="ltr"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">عنوان صفحة "اتصل بنا"</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.contactPageTitle || ''}
+                                        onChange={e => setLandingConfig({...landingConfig, contactPageTitle: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white font-bold"
+                                    />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-bold text-gray-500 mb-2">رابط الخريطة (Google Maps Embed)</label>
+                                    <input 
+                                        type="text"
+                                        value={landingConfig.contactMapUrl || ''}
+                                        onChange={e => setLandingConfig({...landingConfig, contactMapUrl: e.target.value})}
+                                        className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        dir="ltr"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* --- TESTIMONIALS SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-lg text-amber-600">⭐</span>
+                                آراء العملاء (Testimonials)
+                            </h3>
+                            <div className="space-y-4">
+                                {(landingConfig.testimonials || []).map((t, idx) => (
+                                    <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-bold text-gray-400">رأي #{idx + 1}</span>
+                                            <button 
+                                                onClick={() => {
+                                                    const newT = [...(landingConfig.testimonials || [])];
+                                                    newT.splice(idx, 1);
+                                                    setLandingConfig({...landingConfig, testimonials: newT});
+                                                }}
+                                                className="text-red-500 text-[10px] font-bold hover:underline"
+                                            >حذف ✕</button>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <input 
+                                                type="text"
+                                                placeholder="اسم العميل"
+                                                value={t.name}
+                                                onChange={e => {
+                                                    const newT = [...(landingConfig.testimonials || [])];
+                                                    newT[idx] = {...newT[idx], name: e.target.value};
+                                                    setLandingConfig({...landingConfig, testimonials: newT});
+                                                }}
+                                                className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-bold"
+                                            />
+                                            <input 
+                                                type="text"
+                                                placeholder="المسمى الوظيفي (مثال: مالك صيدلية)"
+                                                value={t.role}
+                                                onChange={e => {
+                                                    const newT = [...(landingConfig.testimonials || [])];
+                                                    newT[idx] = {...newT[idx], role: e.target.value};
+                                                    setLandingConfig({...landingConfig, testimonials: newT});
+                                                }}
+                                                className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                            />
+                                        </div>
+                                        <textarea 
+                                            placeholder="نص التقييم"
+                                            value={t.text}
+                                            onChange={e => {
+                                                const newT = [...(landingConfig.testimonials || [])];
+                                                newT[idx] = {...newT[idx], text: e.target.value};
+                                                setLandingConfig({...landingConfig, testimonials: newT});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                            rows={2}
+                                        />
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs font-bold text-gray-500">التقييم (1-5):</label>
+                                            <input 
+                                                type="number"
+                                                min={1} max={5}
+                                                value={t.rating}
+                                                onChange={e => {
+                                                    const newT = [...(landingConfig.testimonials || [])];
+                                                    newT[idx] = {...newT[idx], rating: Number(e.target.value)};
+                                                    setLandingConfig({...landingConfig, testimonials: newT});
+                                                }}
+                                                className="w-20 px-3 py-1.5 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-bold text-amber-500"
+                                            />
+                                            <span className="text-amber-400 text-lg">{Array.from({length: t.rating}).map(() => '★').join('')}</span>
+                                        </div>
+                                    </div>
+                                ))}
+                                <button 
+                                    onClick={() => {
+                                        setLandingConfig({
+                                            ...landingConfig, 
+                                            testimonials: [...(landingConfig.testimonials || []), { name: '', role: '', text: '', rating: 5 }]
+                                        });
+                                    }}
+                                    className="w-full py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-gray-400 hover:text-amber-500 hover:border-amber-500 transition-all font-bold text-sm"
+                                >+ إضافة رأي جديد</button>
+                            </div>
+                        </div>
+
+                        {/* --- FAQS SECTION --- */}
+                        <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                            <h3 className="text-xl font-black text-slate-800 dark:text-white mb-6 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-4">
+                                <span className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600">❓</span>
+                                الأسئلة الشائعة (FAQ)
+                            </h3>
+                            <div className="space-y-4">
+                                {(landingConfig.faqs || []).map((faq, idx) => (
+                                    <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-bold text-gray-400">سؤال #{idx + 1}</span>
+                                            <button 
+                                                onClick={() => {
+                                                    const newFaqs = [...(landingConfig.faqs || [])];
+                                                    newFaqs.splice(idx, 1);
+                                                    setLandingConfig({...landingConfig, faqs: newFaqs});
+                                                }}
+                                                className="text-red-500 text-[10px] font-bold hover:underline"
+                                            >حذف ✕</button>
+                                        </div>
+                                        <input 
+                                            type="text"
+                                            placeholder="السؤال"
+                                            value={faq.question}
+                                            onChange={e => {
+                                                const newFaqs = [...(landingConfig.faqs || [])];
+                                                newFaqs[idx] = {...newFaqs[idx], question: e.target.value};
+                                                setLandingConfig({...landingConfig, faqs: newFaqs});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm font-bold"
+                                        />
+                                        <textarea 
+                                            placeholder="الإجابة"
+                                            value={faq.answer}
+                                            onChange={e => {
+                                                const newFaqs = [...(landingConfig.faqs || [])];
+                                                newFaqs[idx] = {...newFaqs[idx], answer: e.target.value};
+                                                setLandingConfig({...landingConfig, faqs: newFaqs});
+                                            }}
+                                            className="w-full px-4 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-800 text-sm"
+                                            rows={2}
+                                        />
+                                    </div>
+                                ))}
+                                <button 
+                                    onClick={() => {
+                                        setLandingConfig({
+                                            ...landingConfig, 
+                                            faqs: [...(landingConfig.faqs || []), { question: '', answer: '' }]
+                                        });
+                                    }}
+                                    className="w-full py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-gray-400 hover:text-purple-500 hover:border-purple-500 transition-all font-bold text-sm"
+                                >+ إضافة سؤال جديد</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {activeTab === 'settings' && (
                     <div className="space-y-6 animate-in fade-in duration-300">
                         {/* Session Settings */}

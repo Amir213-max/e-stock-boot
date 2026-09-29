@@ -3,13 +3,13 @@ import { motion } from 'motion/react';
 import { 
   Settings, Save, LogOut, Layout, Database, 
   MessageSquare, HelpCircle, Plus, Trash2,
-  ArrowLeft, Award, Headset, CheckCircle2, Wallet, RefreshCw
+  ArrowLeft, Award, Headset, CheckCircle2, Wallet, RefreshCw, Globe, Star
 } from 'lucide-react';
 import { db } from '../services/db';
 import { LandingConfig } from '../types';
 import { defaultProducts } from '../data/defaultProducts';
 
-type TabType = 'general' | 'products' | 'pricing' | 'testimonials' | 'faq';
+type TabType = 'general' | 'features' | 'products' | 'pricing' | 'testimonials' | 'faq' | 'integrations';
 
 export default function LandingAdmin({ onBack }: { onBack: () => void }) {
   const [password, setPassword] = useState('');
@@ -59,7 +59,10 @@ export default function LandingAdmin({ onBack }: { onBack: () => void }) {
     if (!config) return;
     try {
       setSaveStatus('saving');
-      await db.saveLandingConfig(config);
+      // Sync whatsapp fields
+      const finalConfig = { ...config, whatsappNumber: config.whatsappPhone || config.whatsappNumber };
+      await db.saveLandingConfig(finalConfig);
+      setConfig(finalConfig);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
@@ -133,10 +136,12 @@ export default function LandingAdmin({ onBack }: { onBack: () => void }) {
           <div className="w-full md:w-64 shrink-0 space-y-2">
             {[
               { id: 'general', label: 'الإعدادات العامة', icon: Layout },
+              { id: 'features', label: 'المميزات', icon: Star },
               { id: 'products', label: 'الأنظمة والبرامج', icon: Database },
               { id: 'pricing', label: 'الخطط والأسعار', icon: Wallet },
               { id: 'testimonials', label: 'آراء العملاء', icon: MessageSquare },
               { id: 'faq', label: 'الأسئلة الشائعة', icon: HelpCircle },
+              { id: 'integrations', label: 'التكاملات الحكومية', icon: Globe },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -163,6 +168,14 @@ export default function LandingAdmin({ onBack }: { onBack: () => void }) {
                   </div>
                 </Section>
 
+                <Section title="صفحة من نحن (About)" icon={Award}>
+                  <div className="grid grid-cols-1 gap-4">
+                    <Input label="عنوان الصفحة" value={config.aboutPageTitle || ''} onChange={v => updateConfig('aboutPageTitle', v)} />
+                    <Input label="محتوى الصفحة" value={config.aboutPageContent || ''} onChange={v => updateConfig('aboutPageContent', v)} isTextArea />
+                    <Input label="رابط صورة الشركة" value={config.aboutPageImage || ''} onChange={v => updateConfig('aboutPageImage', v)} />
+                  </div>
+                </Section>
+
                 <Section title="أرقام وإحصائيات" icon={Award}>
                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                      {config.stats.map((stat, idx) => (
@@ -182,6 +195,8 @@ export default function LandingAdmin({ onBack }: { onBack: () => void }) {
 
                 <Section title="بيانات التواصل والعناوين" icon={Headset}>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Input label="عنوان صفحة اتصل بنا" value={config.contactPageTitle || ''} onChange={v => updateConfig('contactPageTitle', v)} />
+                    <Input label="رابط الخريطة (Embed URL)" value={config.contactMapUrl || ''} onChange={v => updateConfig('contactMapUrl', v)} />
                     <Input label="رقم الهاتف" value={config.contactPhone} onChange={v => updateConfig('contactPhone', v)} />
                     <Input label="رقم الواتساب (بدون +)" value={config.whatsappPhone} onChange={v => updateConfig('whatsappPhone', v)} />
                     <Input label="البريد الإلكتروني" value={config.contactEmail} onChange={v => updateConfig('contactEmail', v)} />
@@ -560,13 +575,172 @@ export default function LandingAdmin({ onBack }: { onBack: () => void }) {
               </div>
             )}
 
+            {/* --- INTEGRATIONS TAB --- */}
+            {activeTab === 'integrations' && (
+              <div className="space-y-6 animate-in fade-in slide-in-from-left-4">
+                <div className="flex justify-between items-center mb-2">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900">التكاملات الحكومية الرسمية</h3>
+                    <p className="text-xs text-slate-400 font-bold mt-1">تحكم في بطاقات الربط مع المنظومات الحكومية الظاهرة في الموقع</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const current = config.integrations || [];
+                      updateConfig('integrations', [...current, {
+                        flag: '🇪🇬',
+                        country: 'اسم الدولة',
+                        title: 'عنوان التكامل',
+                        desc: 'وصف التكامل مع المنظومة الحكومية',
+                        badge: 'شارة',
+                        accent: 'border-t-orange-500',
+                        badgeBg: 'bg-orange-50 text-orange-600 border-orange-200'
+                      }]);
+                    }}
+                    className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-all"
+                  >
+                    <Plus size={16} />
+                    <span>إضافة تكامل</span>
+                  </button>
+                </div>
+
+                {(config.integrations || []).map((item, idx) => (
+                  <div key={idx} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-2xl">{item.flag}</span>
+                      <button
+                        onClick={() => updateConfig('integrations', (config.integrations || []).filter((_, i) => i !== idx))}
+                        className="text-red-400 hover:text-red-600 text-sm font-bold flex items-center gap-1"
+                      >
+                        <Trash2 size={14} /> حذف
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block px-1">الرايه (Emoji)</label>
+                        <input
+                          type="text" value={item.flag}
+                          onChange={e => {
+                            const list = [...(config.integrations || [])]; list[idx] = { ...list[idx], flag: e.target.value };
+                            updateConfig('integrations', list);
+                          }}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 focus:border-orange-500 transition-all"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block px-1">اسم الدولة</label>
+                        <input
+                          type="text" value={item.country}
+                          onChange={e => {
+                            const list = [...(config.integrations || [])]; list[idx] = { ...list[idx], country: e.target.value };
+                            updateConfig('integrations', list);
+                          }}
+                          className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 focus:border-orange-500 transition-all"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block px-1">عنوان التكامل</label>
+                      <input
+                        type="text" value={item.title}
+                        onChange={e => {
+                          const list = [...(config.integrations || [])]; list[idx] = { ...list[idx], title: e.target.value };
+                          updateConfig('integrations', list);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 focus:border-orange-500 transition-all"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block px-1">الوصف</label>
+                      <textarea
+                        value={item.desc}
+                        onChange={e => {
+                          const list = [...(config.integrations || [])]; list[idx] = { ...list[idx], desc: e.target.value };
+                          updateConfig('integrations', list);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 focus:border-orange-500 transition-all min-h-[80px] resize-none"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block px-1">نص الشارة (Badge)</label>
+                      <input
+                        type="text" value={item.badge}
+                        onChange={e => {
+                          const list = [...(config.integrations || [])]; list[idx] = { ...list[idx], badge: e.target.value };
+                          updateConfig('integrations', list);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-5 py-4 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 focus:border-orange-500 transition-all"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                {(config.integrations || []).length === 0 && (
+                  <div className="text-center py-16 text-slate-400">
+                    <Globe size={48} className="mx-auto mb-4 opacity-30" />
+                    <p className="font-bold">لا توجد تكاملات — اضغط «إضافة تكامل» لإضافة أول بطاقة</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* --- FEATURES TAB --- */}
+            {activeTab === 'features' && (
+              <div className="space-y-6 animate-in fade-in slide-in-from-left-4">
+                <div className="flex justify-between items-center mb-2">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900">المميزات (ما يميزنا عن غيرنا)</h3>
+                    <p className="text-xs text-slate-400 font-bold mt-1">تحكم في البطاقات التي تظهر في قسم لماذا مودرن سوفت</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      const current = config.features || [];
+                      updateConfig('features', [...current, { title: 'ميزة جديدة', desc: 'وصف الميزة...', icon: '⚡' }]);
+                    }}
+                    className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-slate-800 transition-all"
+                  >
+                    <Plus size={16} />
+                    <span>إضافة ميزة</span>
+                  </button>
+                </div>
+
+                <div className="space-y-4 mb-8">
+                  <Section title="عناوين القسم" icon={Star}>
+                    <Input label="العنوان الرئيسي" value={config.featuresTitle} onChange={v => updateConfig('featuresTitle', v)} />
+                    <Input label="العنوان الفرعي" value={config.featuresSubtitle} onChange={v => updateConfig('featuresSubtitle', v)} isTextArea />
+                  </Section>
+                </div>
+
+                {(config.features || []).map((feat, idx) => (
+                  <div key={idx} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-2xl">{feat.icon}</span>
+                      <button onClick={() => updateConfig('features', (config.features || []).filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-600 text-sm font-bold flex items-center gap-1">
+                        <Trash2 size={14} /> حذف الميزة
+                      </button>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Input label="عنوان الميزة" value={feat.title} onChange={v => {
+                        const nf = [...(config.features || [])]; nf[idx].title = v; updateConfig('features', nf);
+                      }} />
+                      <Input label="الأيقونة (Emoji)" value={feat.icon} onChange={v => {
+                        const nf = [...(config.features || [])]; nf[idx].icon = v; updateConfig('features', nf);
+                      }} />
+                    </div>
+                    <Input label="الوصف" value={feat.desc} onChange={v => {
+                        const nf = [...(config.features || [])]; nf[idx].desc = v; updateConfig('features', nf);
+                    }} isTextArea />
+                  </div>
+                ))}
+              </div>
+            )}
+
           </div>
         </div>
       </div>
     </div>
   );
 }
-
 function Section({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm overflow-hidden">

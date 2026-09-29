@@ -2,10 +2,11 @@
 import React, { useState, useEffect } from 'react';
 import BotInterface from './components/BotInterface';
 import RatingModal from './components/RatingModal';
-import NewLanding from './components/NewLanding';
+
 import Login from './components/Login';
 import AdminDashboard from './components/AdminDashboard';
 import LandingAdmin from './components/LandingAdmin';
+import NewLanding from './components/NewLanding';
 import GuestBot from './components/GuestBot';
 import { AppMode, ChatLog, Customer } from './types';
 import { db } from './services/db';
@@ -158,8 +159,6 @@ const App: React.FC = () => {
                     <NewLanding
                         onOpenChat={() => setMode(AppMode.LOGIN)}
                         onSecretClick={() => setMode(AppMode.LANDING_ADMIN)}
-                        isDarkMode={isDarkMode}
-                        toggleTheme={toggleTheme}
                     />
                 </div>
             )}

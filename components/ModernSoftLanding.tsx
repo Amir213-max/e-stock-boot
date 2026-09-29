@@ -1,17 +1,19 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../services/db';
+import { db, firestoreDb } from '../services/db';
 import { LandingConfig, Product } from '../types';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface ModernSoftLandingProps {
   onOpenChat: () => void;
+  onSecretClick?: () => void;
   isDarkMode?: boolean;
   toggleTheme?: () => void;
 }
 
 type View = 'HOME' | 'PRODUCTS' | 'ABOUT' | 'CONTACT';
 
-const ModernSoftLanding: React.FC<ModernSoftLandingProps> = ({ onOpenChat, isDarkMode, toggleTheme }) => {
+const ModernSoftLanding: React.FC<ModernSoftLandingProps> = ({ onOpenChat, onSecretClick, isDarkMode, toggleTheme }) => {
   const [config, setConfig] = useState<LandingConfig | null>(null);
   const [currentView, setCurrentView] = useState<View>('HOME');
 
@@ -29,11 +31,38 @@ const ModernSoftLanding: React.FC<ModernSoftLandingProps> = ({ onOpenChat, isDar
   const [editForm, setEditForm] = useState<LandingConfig | null>(null);
 
   useEffect(() => {
+    // Initial Load
     const loadConfig = async () => {
       const data = await db.getLandingConfig();
       setConfig(data);
+      if (data.heroTitle) document.title = data.heroTitle;
     };
     loadConfig();
+
+    // Real-time Sync
+    let unsubscribe: (() => void) | null = null;
+    if (firestoreDb) {
+      try {
+        const landingRef = doc(firestoreDb, 'settings', 'landing');
+        unsubscribe = onSnapshot(landingRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data() as any;
+            // Merge with local config to ensure we don't lose fields not yet in DB
+            setConfig(prev => {
+              const next = { ...prev, ...data };
+              if (next.heroTitle) document.title = next.heroTitle;
+              return next;
+            });
+          }
+        });
+      } catch (e) {
+        console.warn("Snapshot failed", e);
+      }
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   const handleSecretClick = () => {
@@ -42,12 +71,15 @@ const ModernSoftLanding: React.FC<ModernSoftLandingProps> = ({ onOpenChat, isDar
 
     if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
 
-    if (newCount >= 10) {
+    if (newCount >= 20) {
       setLogoClicks(0);
+      setShowPasswordPrompt(false); // Hide internal prompt if it was shown
+      onSecretClick?.();
+    } else if (newCount === 10) {
       setShowPasswordPrompt(true);
-    } else {
-      clickTimeoutRef.current = setTimeout(() => setLogoClicks(0), 2000);
     }
+
+    clickTimeoutRef.current = setTimeout(() => setLogoClicks(0), 5000);
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -266,9 +298,9 @@ const ModernSoftLanding: React.FC<ModernSoftLandingProps> = ({ onOpenChat, isDar
                 <p className="text-gray-600 dark:text-gray-300 mb-4 text-sm leading-relaxed">{product.description}</p>
                 <button
                   onClick={() => {
-                    const message = `أنا مهتم بمنتج: ${product.name}`;
-                    const url = `tel:01272000075`;
-                    window.open(url, '_self');
+                    const message = encodeURIComponent(`أنا مهتم بمنتج: ${product.name}`);
+                    const url = `https://wa.me/${config.whatsappNumber}?text=${message}`;
+                    window.open(url, '_blank');
                   }}
                   className="w-full py-2 bg-gray-900 dark:bg-gray-700 text-white rounded-lg font-bold hover:bg-[#25D366] dark:hover:bg-[#25D366] transition-colors text-sm flex items-center justify-center gap-2"
                 >

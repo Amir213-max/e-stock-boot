@@ -51,7 +51,7 @@ const INITIAL_KB: KBItem[] = [];
 
 const INITIAL_LANDING_CONFIG: LandingConfig = {
     heroTitle: 'مؤسسة مودرن سوفت للبرمجيات',
-    heroSubtitle: 'متخصصون فى صناعه حلول برمجية متطورة لنمو اعمالك',
+    heroSubtitle: 'متخصصون فى صناعة حلول برمجية متطورة لنمو اعمالك',
     heroButtonText: 'إحجز ديمو الآن',
     stats: [
         { label: 'عميل يثق بنا', value: '+500', icon: 'Users' },
@@ -62,9 +62,9 @@ const INITIAL_LANDING_CONFIG: LandingConfig = {
     featuresTitle: 'لماذا تختار أنظمة مودرن سوفت؟',
     featuresSubtitle: 'نحن لا نقدم مجرد برامج، بل نقدم حلولاً ذكية تضمن لك السيطرة الكاملة على عملك.',
     features: [
-        { title: 'دعم فني متميز', desc: 'فريق متخصص متاح دائماً للرد على استفساراتك وحل مشكلاتك فوراً.', icon: 'Headset' },
-        { title: 'أمان فائق', desc: 'تشفير كامل للبيانات وحماية قصوى لخصوصية عملائك وحساباتك.', icon: 'Shield' },
-        { title: 'سهولة الاستخدام', desc: 'واجهات عصرية بسيطة تم تصميمها لتناسب الجميع دون الحاجة لخبرة تقنية.', icon: 'Zap' }
+        { title: 'تغطية شاملة', desc: 'متواجدين داخل جميع المحافظات ، نصلك أينما كنت', icon: '📍' },
+        { title: 'دعم مجاني', desc: 'أقوى فريق دعم أونلاين مجاناً لخدمتكم', icon: '🎧' },
+        { title: 'تطوير مستمر', desc: 'تحديثات وتطويرات مستمرة تتوافق مع تغيرات السوق', icon: '📈' }
     ],
     aboutCompanyText: 'شركة Modern Soft هي الرائدة في حلول البرمجيات الطبية والتجارية، نهدف دائماً للابتكار وتقديم الأفضل لعملائنا.',
     contactEmail: 'info@modernsoft.com',
@@ -99,8 +99,44 @@ const INITIAL_LANDING_CONFIG: LandingConfig = {
     faqs: [
         { question: "هل النظام يدعم الفاتورة الإلكترونية؟", answer: "نعم، جميع أنظمة مودرن سوفت متوافقة تماماً مع متطلبات مصلحة الضرائب المصرية للفاتورة والإيصال الإلكتروني." },
         { question: "هل أحتاج لإنترنت دائم لتشغيل النظام؟", answer: "لا، الأنظمة تعمل بكفاءة تامة بدون إنترنت (Offline)، ويتم استخدام الإنترنت فقط في حال رغبتك في النسخ الاحتياطي السحابي أو التقارير عن بعد." },
-        { question: "هل يوجد دعم فني بعد البيع؟", answer: "بكل تأكيد، نوفر دعم فني مجاني ومتميز عبر الهاتف، الأونلاين، أو الزيارات الميدانية لضمان استقرار عملك." }
-    ]
+        { question: "هل يوجد دعم فني بعد البيع؟", answer: "بكل تأكيد، نوفر دعم فني مجاني ومتميز عبر الهاتف، الأونلاين، أو الزيارات الميدانية لضمان استقرار عملك."
+        }
+    ],
+    integrations: [
+        {
+            flag: "🇪🇬",
+            country: "جمهورية مصر العربية",
+            title: "منظومة الفاتورة والإيصال الإلكتروني",
+            desc: "ربط مباشر ومعتمد مع منظومة الفاتورة الإلكترونية التابعة لمصلحة الضرائب المصرية",
+            badge: "مصر",
+            accent: "border-t-red-500",
+            badgeBg: "bg-red-50 text-red-600 border-red-200"
+        },
+        {
+            flag: "🇸🇦",
+            country: "المملكة العربية السعودية",
+            title: "هيئة الزكاة والضريبة والجمارك",
+            desc: "تكامل كامل مع منظومة فاتورة (FATOORA) وضريبة القيمة المضافة وفق اشتراطات ZATCA",
+            badge: "السعودية",
+            accent: "border-t-green-500",
+            badgeBg: "bg-green-50 text-green-700 border-green-200"
+        },
+        {
+            flag: "🇸🇦",
+            country: "المملكة العربية السعودية",
+            title: "هيئة الرصد والتحقق من المنتجات",
+            desc: "ربط تلقائي مع منظومة رصد للتحقق من مصدر المنتجات الصيدلانية وضمان سلامة سلسلة الإمداد",
+            badge: "السعودية",
+            accent: "border-t-blue-500",
+            badgeBg: "bg-blue-50 text-blue-700 border-blue-200"
+        }
+    ],
+    // ModernSoftLanding Defaults
+    aboutPageTitle: 'قصة نجاح مودرن سوفت',
+    aboutPageContent: 'نحن شركة رائدة في مجال حلول البرمجيات، بخبرة تزيد عن 10 سنوات في السوق المصري والعربي. نهدف لتطوير أنظمة تساعد أصحاب الأعمال على النجاح.',
+    aboutPageImage: 'https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=2069&auto=format&fit=crop',
+    contactPageTitle: 'تواصل مع فريقنا المبدع',
+    contactMapUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3453.123456789!2d31.23456789!3d30.12345678!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMzDCsDA3JzM0LjUiTiAzMcKwMTQnMDQuNCJF!5e0!3m2!1sen!2seg!4v1234567890'
 };
 
 const SCREEN_IMAGES: Record<string, string> = {
@@ -357,6 +393,21 @@ export const db = {
         logs.unshift(log);
         localStorage.setItem(KEYS.LOGS, JSON.stringify(logs));
     },
+    dismissUnansweredLog: async (logId: string) => {
+        if (dbInstance) {
+            try {
+                await setDoc(doc(dbInstance, "logs", logId), { isUnanswered: false }, { merge: true });
+            } catch (e) { }
+        }
+        const data = localStorage.getItem(KEYS.LOGS);
+        if (data) {
+            try {
+                const logs: ChatLog[] = JSON.parse(data);
+                const updated = logs.map(l => l.id === logId ? { ...l, isUnanswered: false } : l);
+                localStorage.setItem(KEYS.LOGS, JSON.stringify(updated));
+            } catch (e) { }
+        }
+    },
     getFeedback: async (): Promise<Feedback[]> => {
         if (dbInstance) {
             try {
@@ -516,7 +567,12 @@ export const db = {
     },
     saveLandingConfig: async (config: LandingConfig) => {
         if (dbInstance) {
-            try { await setDoc(doc(dbInstance, "settings", "landing"), config); } catch (e) { }
+            try { 
+                await setDoc(doc(dbInstance, "settings", "landing"), config); 
+            } catch (e) { 
+                console.error("Error saving landing config:", e);
+                throw e; 
+            }
         }
         localStorage.setItem(KEYS.LANDING, JSON.stringify(config));
     },
