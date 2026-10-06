@@ -318,7 +318,6 @@ ${docsInstruction}`;
                         systemInstruction: systemInstruction,
                         tools: tools,
                         maxOutputTokens: 600,  // تحديد حد أقصى للإجابة لتوفير التوكن
-                        thinkingConfig: { thinkingBudget: 0 }, // إيقاف Thinking لتوفير التوكن
                     },
                 });
 

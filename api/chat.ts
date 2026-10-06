@@ -38,7 +38,6 @@ export default async function handler(
         tools: tools || [],
         temperature: 0.1,
         maxOutputTokens: 600,
-        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
