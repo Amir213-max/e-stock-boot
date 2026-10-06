@@ -32,7 +32,7 @@ export default async function handler(
 
     // Create chat with system instruction and tools
     const chat = ai.chats.create({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       config: {
         systemInstruction: systemInstruction || '',
         tools: tools || [],

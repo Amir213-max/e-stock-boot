@@ -896,7 +896,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
             });
             const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3.8-flash',
                 contents: [{
                     role: "user",
                     parts: [
@@ -941,7 +941,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
             });
             const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3.8-flash',
                 contents: [{
                     role: "user",
                     parts: [
@@ -1040,7 +1040,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ isDarkMode, toggleTheme
             const prompt = `أنت خبير وتدقق معلومات تدريب البوت لنظام ${activeSystemType}. حلل هذه المعلومات بدقة، واكتشف ما إذا كان هناك أي تضارب (Contradiction) أو تعارض قاطع في المنطق أو الأرقام. اكتب تحليلاً بالعربية، إذا وجد تضارب وضحه بوضوح شديد، وإن لم يوجد قل بصراحة: "جميع المعلومات متوافقة ولا يوجد تضارب".\n\nمعلومات النظام:\n${dataToAnalyze}`;
             
             const ai = new GoogleGenAI({ apiKey: (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "" });
-            const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+            const response = await ai.models.generateContent({ model: 'gemini-3.8-flash', contents: prompt });
             setSanityCheckResult(response.text || "لم يتم إيجاد تضارب.");
         } catch(e: any) {
             setSanityCheckResult(`خطأ في فحص التضارب: ${e.message}`);
