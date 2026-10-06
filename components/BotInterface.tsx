@@ -327,7 +327,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                 toolsRef.current = tools;
 
                 chatRef.current = ai.chats.create({
-                    model: 'gemini-3.8-flash',
+                    model: 'gemini-3.5-flash',
                     config: {
                         systemInstruction: systemInstruction,
                         tools: tools,
