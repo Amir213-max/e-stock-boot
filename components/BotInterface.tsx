@@ -265,12 +265,12 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
 
                 let snippetsInstruction = '';
                 if (snippets.length > 0) {
-                    // IMPORTANT: We tell the model these snippets are CRITICAL UPDATES
-                    snippetsInstruction = `\n\n=== 🚨 CRITICAL UPDATES & NEW KNOWLEDGE (HIGHEST PRIORITY) ===\nThe following information was manually added by the admin to train you. \n**RULE: If any information here conflicts with other manuals, YOU MUST USE THE INFO BELOW as the correct truth.**\n`;
+                    snippetsInstruction = `\n\n=== تحديثات وأجوبة مهمة (الأولوية القصوى) ===\n`;
                     snippets.forEach(s => {
-                        const content = s.content.length > 2000 ? s.content.substring(0, 2000) + '...' : s.content;
-                        const navInfo = (s.menuName || s.screenName) ? `[Navigation Protocol: ${s.menuName ? 'القائمة الرئيسية: ' + s.menuName : ''} ${s.screenName ? ' -> الشاشة: ' + s.screenName : ''}]` : '';
-                        snippetsInstruction += `-[ID: ${s.id}] ${navInfo}\nContent: ${content} ${s.imageUrl ? '(Has Image available)' : ''}\n`;
+                        // تقليل حجم كل snippet إلى 800 حرف لتوفير التوكن
+                        const content = s.content.length > 800 ? s.content.substring(0, 800) + '...' : s.content;
+                        const navInfo = (s.menuName || s.screenName) ? `[القائمة: ${s.menuName || ''} ${s.screenName ? '← ' + s.screenName : ''}]` : '';
+                        snippetsInstruction += `-[${s.id}] ${navInfo}\n${content} ${s.imageUrl ? '(يوجد صورة)' : ''}\n`;
                     });
                 }
 
@@ -284,41 +284,27 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
             Website Footer Text: ${landingConfig.footerText}
             `;
 
-                const docsInstruction = `\n\n=== UI SCREENS & MENUS PATHS (Navigation Guide) ===\n${menusText}\n${snippetsInstruction}\n${companyInfo}\n\nUse the menus to accurately guide the customer step by step. Answer queries strictly relevant to ${sysType} system based on RAG contexts.`;
+                // === تجميع الوثائق (مع حد أقصى لتوفير التوكن) ===
+                // Limit menus text to 1500 chars to save tokens
+                const menusShort = menusText.length > 1500 ? menusText.substring(0, 1500) + '...' : menusText;
+                const docsInstruction = `\n=== مسارات القوائم ===\n${menusShort}\n${snippetsInstruction}\n=== بيانات الشركة ===\nتليفون: ${landingConfig.contactPhone} | واتساب: ${landingConfig.whatsappNumber}`;
 
                 const ai = new GoogleGenAI({ apiKey });
 
-                // --- PERSONA SETUP ---
-                const clientName = customer?.name || "عميل غير معروف";
-                const clientInfoStr = customer
-                    ? `Client Name: ${customer.name}\nContract Number: ${customer.contractNumber}\nPrevious Logins: ${new Date(Number(customer.lastLogin)).toLocaleDateString()}`
-                    : "Client: Guest/Unknown";
+                const clientName = customer?.name || "فندم";
 
-                const systemInstruction = `You are "Boko Bot" (بوكو بوت), a dedicated and expert TECHNICAL SUPPORT agent for Modern Soft. Your specific assignment is to support users of the **${sysType}** software.
-                    
-                    **YOUR IDENTITY & TONE:**
-                    - You are a smart, friendly, and expert support agent.
-                    - **Language**: Speak strictly in **Egyptian Arabic (Masri)**. Use natural phrases like: "من عيوني", "تحت أمرك", "يا فندم", "بسيطة خالص".
-                    - **Attitude**: Helpful, patient, and knowledgeable. Always acknowledge the user's problem first.
-                    - **System Focus**: You ONLY support ${sysType}. If a screen or feature does not exist in the provided ${sysType} documentation below, tell the user gracefully that it does not exist in this system, without mentioning other systems.
-                    
-                    **KNOWLEDGE BASE USAGE:**
-                    - Your knowledge base now contains **Structured Q&A** sections.
-                    - **Navigation Paths**: If a snippet contains "القائمة الرئيسية" or "الشاشة", prioritize mentioning these paths clearly to the user (e.g., "اتفضل يا فندم، هتدخل على قائمة [اسم القائمة] وتختار شاشة [اسم الشاشة]").
-                    - **Strategy**: First, scan the docs for a "Q: [User Question]" that matches the user's intent. If found, use the provided "A: [Answer]" as your core response.
-                    - **Style**: Convert the stiff documentation into a warm, helpful conversation.
-                    - **Steps**: When giving instructions, ALWAYS use numbered lists (1. 2. 3.) for clarity.
-                    - **Conflict Resolution**: If the "Critical Updates" section contradicts the main manual, the Critical Updates ALWAYS win.
-                    
-                    **TROUBLESHOOTING & PROCEDURES:**
-                    - If a user reports a **Printer Issue**, guide them through driver installation (Seagull) and page setup (38x25mm).
-                    - If a user asks about **Networking**, explain the 4 methods (Local name, Static IP, Radmin VPN) + Firewall (Port 1433).
-                    
-                    **INTERACTION RULES:** 
-                    - **Greeting**:  If the customer name is known (${clientName}), welcome them warmly.
-                    - **Unknowns**: If the info is completely missing from your docs, say: "للاسف المعلومة دي مش موجودة عندي حالياً بخصوص برنامج ${sysType}، ممكن تتواصل مع الدعم الفني عشان يفيدوك أكتر." provide the phone number.
-
-                    ${docsInstruction}`;
+                // === System Instruction مضغوطة لتوفير التوكن ===
+                const systemInstruction = `أنت "بوكو بوت"، مساعد دعم فني ذكي لبرنامج ${sysType} من Modern Soft.
+- تكلم بالعامية المصرية دايماً. استخدم: "من عيوني"، "تحت أمرك"، "يا فندم"، "بسيطة خالص".
+- مهتم فقط ببرنامج ${sysType}، ومش بتتكلم عن أي برنامج تاني.
+- لو في العميل اسم (${clientName})، رحب بيه باسمه.
+- استخدم القوائم والمسارات الموجودة دي بالضبط.
+- لو السؤال مش موجود: "للأسف مش عندي المعلومة دي، تواصل مع الدعم الفني على ${landingConfig.contactPhone}".
+- لو سؤال تقني: استخدم search_knowledge_base أولاً.
+- الردود: قصيرة ومرتبة بأرقام (1. 2. 3.) ومباشرة.
+- مشاكل الطابعة: درايفر Seagull، إعداد 38x25mm.
+- مشاكل الشبكة: 4 طرق (Local name / Static IP / Radmin VPN) + Firewall port 1433.
+${docsInstruction}`;
 
                 const tools = [{ functionDeclarations: [searchKBTool, showImageTool, showSnippetImageTool] }];
 
@@ -327,10 +313,12 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                 toolsRef.current = tools;
 
                 chatRef.current = ai.chats.create({
-                    model: 'gemini-3.5-flash',
+                    model: 'gemini-3.5-flash-lite',
                     config: {
                         systemInstruction: systemInstruction,
                         tools: tools,
+                        maxOutputTokens: 600,  // تحديد حد أقصى للإجابة لتوفير التوكن
+                        thinkingConfig: { thinkingBudget: 0 }, // إيقاف Thinking لتوفير التوكن
                     },
                 });
 
@@ -490,7 +478,7 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
             let contextParts = "";
             const sysType = customer?.systemType || 'e-Stock Pharmacy';
 
-            // 1. RAG Search: Get similar chunks
+            // 1. RAG Search: Get similar chunks (topK=3 لتوفير التوكن)
             if (userText && userText.length > 3) {
                 try {
                     const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || (process.env as any).API_KEY || "";
@@ -501,11 +489,13 @@ const BotInterface: React.FC<BotInterfaceProps> = ({ customer, onSessionEnd, onA
                     });
                     
                     if (embResponse.embeddings?.[0]?.values) {
-                        const similarChunks = await db.searchSimilarChunks(embResponse.embeddings[0].values, sysType);
+                        // topK=3 بدل 5 لتوفير التوكن
+                        const similarChunks = await db.searchSimilarChunks(embResponse.embeddings[0].values, sysType, 3);
                         if (similarChunks.length > 0) {
-                            contextParts = "\n\n=== RELEVANT DOCUMENTATION CONTEXT ===\n" + 
-                                similarChunks.map(c => c.text).join("\n---\n") + 
-                                "\n====================================\n";
+                            // نأخذ أول 800 حرف من كل chunk لتوفير التوكن
+                            contextParts = "\n=== سياق ذو صلة ===\n" + 
+                                similarChunks.map(c => c.text.substring(0, 800)).join("\n---\n") + 
+                                "\n";
                         }
                     }
                 } catch (ragErr) {

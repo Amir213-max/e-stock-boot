@@ -32,11 +32,13 @@ export default async function handler(
 
     // Create chat with system instruction and tools
     const chat = ai.chats.create({
-      model: 'gemini-3.5-flash',
+      model: 'gemini-3.5-flash-lite',
       config: {
         systemInstruction: systemInstruction || '',
         tools: tools || [],
-        temperature: 0.1, // قفلنا التأليف
+        temperature: 0.1,
+        maxOutputTokens: 600,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 
